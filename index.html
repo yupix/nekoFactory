@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#86c8f5" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="ねこ工場" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <title>ねこ工場</title>
+    <style>
+      html { background: #cdeefa; }
+      /* 描画先の大きさは CSS の到着を待たずに決める（style.css は JS から遅れて読む） */
+      #app { position: fixed; top: 0; left: 0; right: 0; height: 100dvh; }
+      #boot { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; background: linear-gradient(#86c8f5, #cdeefa 55%, #eef9ff); color: #4a3426; font: 15px/1.6 "M PLUS Rounded 1c", "Zen Maru Gothic", "Hiragino Maru Gothic ProN", "Kosugi Maru", "Yu Gothic UI", "Meiryo", system-ui, sans-serif; text-align: center; transition: opacity 0.5s; user-select: none; }
+      #boot.done { opacity: 0; pointer-events: none; }
+      #boot h1 { margin: 0; font-size: 26px; letter-spacing: 0.08em; }
+      #boot .track { position: relative; width: 240px; height: 56px; overflow: hidden; border-bottom: 3px dotted rgba(74, 52, 38, 0.25); }
+      #boot .cat { position: absolute; bottom: 2px; left: 0; width: 64px; height: 44px; fill: #4a3426; animation: boot-across 3.6s linear infinite; }
+      #boot .cat .b { animation: boot-bob 0.36s ease-in-out infinite alternate; }
+      #boot .cat .l { transform-box: fill-box; transform-origin: 50% 0; animation: boot-leg 0.36s ease-in-out infinite alternate; }
+      #boot .cat .l2 { animation-direction: alternate-reverse; }
+      #boot .cat .t { transform-box: fill-box; transform-origin: 0 100%; animation: boot-tail 0.72s ease-in-out infinite alternate; }
+      #boot .bar { width: 240px; height: 10px; border-radius: 5px; background: rgba(255, 255, 255, 0.7); box-shadow: inset 0 1px 2px rgba(74, 52, 38, 0.2); overflow: hidden; }
+      #boot .bar i { display: block; width: 2%; height: 100%; border-radius: 5px; background: linear-gradient(90deg, #f2b632, #ff8fb3); transition: width 0.3s; }
+      #boot-stage { margin: 0; font-weight: 700; min-height: 1.6em; }
+      #boot-tip { margin: 8px 0 0; max-width: 320px; font-size: 14px; color: #8a6f5a; min-height: 3.2em; }
+      @keyframes boot-across { from { transform: translateX(-70px); } to { transform: translateX(250px); } }
+      @keyframes boot-bob { to { transform: translateY(-2px); } }
+      @keyframes boot-leg { from { transform: rotate(28deg); } to { transform: rotate(-28deg); } }
+      @keyframes boot-tail { to { transform: rotate(-18deg); } }
+      @media (prefers-reduced-motion: reduce) { #boot * { animation: none !important; } }
+    </style>
+  </head>
+  <body>
+    <div id="boot" role="status" aria-live="polite">
+      <h1>ねこ工場</h1>
+      <div class="track" aria-hidden="true">
+        <svg class="cat" viewBox="0 0 64 44">
+          <g class="b">
+            <path class="t" d="M12 20 Q4 18 3 8 Q2 4 5 5 Q6 14 13 16 Z" />
+            <ellipse cx="28" cy="24" rx="17" ry="9" />
+            <circle cx="48" cy="17" r="8.5" />
+            <path d="M41 13 L42 3 L48 9 Z M50 9 L55 3 L56 13 Z" />
+          </g>
+          <rect class="l" x="14" y="28" width="5" height="14" rx="2.5" />
+          <rect class="l l2" x="19" y="28" width="5" height="14" rx="2.5" />
+          <rect class="l l2" x="34" y="28" width="5" height="14" rx="2.5" />
+          <rect class="l" x="39" y="28" width="5" height="14" rx="2.5" />
+        </svg>
+      </div>
+      <div class="bar"><i id="boot-bar"></i></div>
+      <p id="boot-stage">読み込んでいます</p>
+      <p id="boot-tip"></p>
+    </div>
+    <script>
+      (function () {
+        var tips = [
+          '釣り場と市場を置くと、猫が魚を運んで売ってくれます',
+          '寝ている猫をクリックすると、撫でて起こせます',
+          '研究所に品物を届けると研究点（RP）がたまります',
+          '建物に「!」が出たら出力がいっぱい。猫を増やしましょう',
+          '得意なステータスに合う建物に配属すると、生産が ×1.25 になります',
+          '猫ベッドやおもちゃ箱があると、猫が早く元気になります',
+          '右ドラッグか Q / E でカメラを回せます',
+          '「島を広げる」で土地を 1 周ずつ広げられます',
+        ];
+        document.getElementById('boot-tip').textContent = 'ヒント: ' + tips[Math.floor(Math.random() * tips.length)];
+        addEventListener('error', function () {
+          var b = document.getElementById('boot');
+          if (b && !b.classList.contains('done')) document.getElementById('boot-stage').textContent = '読み込みに失敗しました。再読み込みしてください';
+        });
+      })();
+    </script>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
