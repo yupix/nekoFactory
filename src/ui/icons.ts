@@ -52,5 +52,7 @@ export const ICON = {
   bolt: svg('<path d="M13.5 2 5 13.5h6L9.5 22 19 9.5h-6.2z" fill="#ffd34d" stroke="#d48a12" stroke-width="1.3" stroke-linejoin="round"/>'),
   rotate: svg('<path d="M19 12a7 7 0 1 1-2.1-5" stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round"/><path d="M19.5 3.5v5h-5" stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'),
   robot: svg('<rect x="5" y="8" width="14" height="11" rx="4" fill="#b7c4d0" stroke="#5a6f82" stroke-width="1.3"/><path d="m6 9 1-5 3.5 3.5M18 9l-1-5-3.5 3.5" fill="#b7c4d0" stroke="#5a6f82" stroke-width="1.3" stroke-linejoin="round"/><circle cx="9.3" cy="13" r="1.8" fill="#5fe0ff"/><circle cx="14.7" cy="13" r="1.8" fill="#5fe0ff"/><path d="M10 16.5h4" stroke="#5a6f82" stroke-width="1.3" stroke-linecap="round"/>'),
+  pause: svg('<rect x="6" y="5" width="4" height="14" rx="1.4" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1.4" fill="currentColor"/>'),
+  play: svg('<path d="M7.5 5.2v13.6a1 1 0 0 0 1.5.9l10.6-6.8a1 1 0 0 0 0-1.7L9 4.3a1 1 0 0 0-1.5.9z" fill="currentColor"/>'),
   follow: svg('<circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="currentColor"/><path d="M12 1.5v4M12 18.5v4M1.5 12h4M18.5 12h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>'),
 };

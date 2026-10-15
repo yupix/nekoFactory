@@ -187,6 +187,7 @@ input[type="range"]::-moz-range-thumb { width: 22px; height: 22px; border: 0; bo
 .stocks .row.carry .it { width: 30px; height: 30px; }
 .state.sleep { background: #7a8fd0; }
 .state.idle { background: #b5a08a; }
+.state.off { background: #7f8a96; }
 
 /* --- トースト --- */
 #toasts { position: fixed; top: calc(84px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; z-index: 50; pointer-events: none; }
@@ -595,6 +596,9 @@ body.intro #bar { transform: translate(-50%, 140%); opacity: 0; }
 #info .rpick { margin: 8px 0 4px; padding: 8px; border-radius: 14px; background: rgba(255, 255, 255, 0.7); }
 #info .rpick .ol { display: block; margin-bottom: 4px; font-size: 12px; font-weight: 900; color: var(--ink-soft); }
 #info .rpick .note { margin: 4px 0 0; font-size: 11.5px; }
+#info .run-box { margin: 8px 0 4px; padding: 8px; border-radius: 14px; background: rgba(255, 255, 255, 0.7); }
+#info .run-box .note { margin: 6px 2px 0; }
+#info .run-box .actions { margin-top: 6px; }
 #info .remove .cost, #info .upgrade .cost, #info .lift-box .cost { display: inline-flex; flex-wrap: wrap; gap: 3px; margin-left: 4px; padding: 1px 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.75); }
 #info .remove .cost .c { color: #6b5444; }
 #info .lift-box { margin-top: 8px; display: grid; gap: 8px; font-size: 12.5px; font-weight: 800; }

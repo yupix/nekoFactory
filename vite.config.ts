@@ -27,6 +27,8 @@ const devGzip: Plugin = {
 };
 
 export default defineConfig({
+  // 相対パスで出力し、GitHub Pages（/nekoFactory/ の下）でもそのまま開けるようにする
+  base: './',
   plugins: [devGzip],
   // dev: 依存を最初から事前バンドルし（途中の依存発見で再読み込みしない）、主要モジュールを温めておく
   optimizeDeps: { include: ['three', ...THREE_JSM.map((f) => `three/examples/jsm/${f}`)] },

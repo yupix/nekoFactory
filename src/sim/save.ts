@@ -1,7 +1,7 @@
-import { GRID, INFINITE, RESEARCH } from './data';
+import { GRID, INFINITE, RAID, RESEARCH } from './data';
 import { genOres, gridSize, initCat, initialState, maxHp, newHand, newRaidState, newRunaway, offlineMultiplier, placeHq, type Cat, type GameState } from './state';
 
-export const SAVE_VERSION = 6;
+export const SAVE_VERSION = 7;
 export const KEY = 'nekoFactory';
 export const BACKUP_KEY = 'nekoFactory.bak';
 const MAX_OFFLINE_SEC = 8 * 3600;
@@ -30,7 +30,7 @@ const MIGRATIONS: Record<number, (s: GameState, now: number) => void> = {
   3(s) {
     for (const b of s.buildings) b.tier ??= 1;
   },
-  // v4→v5: 襲撃と防衛。建物は HP 満タン、中心に本部（中心の建物は最寄りの空きへ）、次の襲撃は読み込みから 8 分後、猫に勇敢
+  // v4→v5: 襲撃と防衛。建物は HP 満タン、中心に本部（中心の建物は最寄りの空きへ）、次の襲撃は読み込みから初回と同じ時間後、猫に勇敢
   4(s) {
     for (const b of s.buildings) b.hp = maxHp(s, b);
     placeHq(s);
@@ -57,6 +57,13 @@ const MIGRATIONS: Record<number, (s: GameState, now: number) => void> = {
     fresh.nextId = Math.max(fresh.nextId, Number(s.nextId) || 0, ...fresh.cats.map((c) => c.id + 1));
     for (const k of Object.keys(s)) delete (s as unknown as Record<string, unknown>)[k];
     Object.assign(s, fresh);
+  },
+  // v6→v7: 初回の襲撃を 8 分後から 15 分後に延ばした。まだ第 1 波が来ていなければ残り時間を延ばした分だけ足す
+  6(s) {
+    const r = s.raid;
+    if (!r || r.wave > 0 || r.cur) return;
+    r.next = Math.min(RAID.first, r.next + RAID.first - 480);
+    if (r.next > 180) r.tip = false;
   },
 };
 

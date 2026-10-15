@@ -27,9 +27,9 @@ function dog(s: GameState, x: number, y: number, o: Partial<Dog> = {}) {
 }
 
 describe('襲撃と防衛', () => {
-  it('開始 8 分で最初のウェーブが出て、5 分おきに続く。止めている間（hidden・オフライン）は進まない', () => {
+  it('開始 15 分で最初のウェーブが出て、5 分おきに続く。止めている間（hidden・オフライン）は進まない', () => {
     const s = island();
-    run(s, 479.9);
+    run(s, 899.9);
     expect(s.raid.cur).toBeNull();
     // hidden の間は tick が呼ばれない。保存して 1 時間後に読み込んでも残り時間は同じ
     const back = deserialize(serialize(s, 0), 3600_000).state;
@@ -42,6 +42,16 @@ describe('襲撃と防衛', () => {
     run(back, 0.1);
     expect(back.raid.wave).toBe(2);
     expect(back.raid.cur?.total).toBe(7);
+  });
+
+  it('初回が 8 分だった頃の保存は、第 1 波の前なら残り時間を 7 分延ばす（15 分を超えない）。第 1 波の後はそのまま', () => {
+    const v6 = (raid: object) => deserialize(JSON.stringify({ version: 6, savedAt: 0, state: { ...island(), raid } }), 0).state.raid;
+    expect(v6({ next: 205, wave: 0, tip: false, cur: null })).toMatchObject({ next: 625, tip: false });
+    // チュートリアルを出した後でも、3 分より先になったらもう一度出す
+    expect(v6({ next: 120, wave: 0, tip: true, cur: null })).toMatchObject({ next: 540, tip: false });
+    expect(v6({ next: 30, wave: 0, tip: true, cur: null })).toMatchObject({ next: 450 });
+    expect(v6({ next: 480, wave: 0, tip: false, cur: null }).next).toBe(900);
+    expect(v6({ next: 100, wave: 2, tip: true, cur: null })).toMatchObject({ next: 100, wave: 2 });
   });
 
   it('犬が建物を噛んで HP 0 で故障し、生産が止まり、修理でコインが減って復旧する', () => {

@@ -2,7 +2,7 @@ import type { Quality, QualityInfo } from '../render/scene';
 import type { CoatKey, ThumbKey } from '../render/thumbs';
 import { liftSpeed } from '../sim/lift';
 import { BUILDINGS, FACILITY, GOOD_BONUS, GRID, HAND, INFINITE, ITEMS, LIFT, MULTI_RECIPE, RAID, RECIPES, RECIPES_OF, RESEARCH, ROBOT, STAT_IDS, STATS, WEAPONS, WORK_STAT, type BuildingType, type Cost, type HandId, type InfiniteId, type ItemId, type RecipeId, type StatId } from '../sim/data';
-import { accepts, isLeaving, MOOD_NAME, moodOf, bufferCap, buildingCount, catCount, crafterCap, craftersOf, expandCost, facilityCap, facilityUsers, gridSize, handPlan, has, hireCost, hpBase, isBroken, isUnlocked, isWorking, liftLineCost, liftUpgradeCost, marketRate, maxHp, missing, missingSources, productionSpeed, recipesOf, recipeTime, recipeUnlocked, refundOf, repairAllCost, repairCost, researchBlocker, robotCount, sourceHint, statBonus, statLevel, stock, storeCap, suppliedItems, TIER_MAX, TIER_RESEARCH, tierSpeed, traitText, TUTORIAL, tutorialDone, upgradeBlocker, upgradeCost, weaponDamage, weaponRange, type Building, type Cat, type GameState, type Lift } from '../sim/state';
+import { accepts, canPause, isLeaving, MOOD_NAME, moodOf, bufferCap, buildingCount, catCount, crafterCap, craftersOf, expandCost, facilityCap, facilityUsers, gridSize, handPlan, has, hireCost, hpBase, isBroken, isUnlocked, isWorking, liftLineCost, liftUpgradeCost, marketRate, maxHp, missing, missingSources, productionSpeed, recipesOf, recipeTime, recipeUnlocked, refundOf, repairAllCost, repairCost, researchBlocker, robotCount, sameSetup, sourceHint, statBonus, statLevel, stock, storeCap, suppliedItems, TIER_MAX, TIER_RESEARCH, tierSpeed, traitText, TUTORIAL, tutorialDone, upgradeBlocker, upgradeCost, uses, weaponDamage, weaponRange, type Building, type Cat, type GameState, type Lift } from '../sim/state';
 import { haulStatus, outputStatus } from '../sim/haul';
 import { hasInputs, outputFull } from '../sim/tick';
 import type { Bus, GameAudio } from './audio';
@@ -155,6 +155,8 @@ export interface HudHandlers {
   repairAll(): void;
   /** 石の炉・組立機のレシピを変える（null は自動） */
   recipe(b: Building, r: RecipeId | null): void;
+  /** 建物を止める（true）・動かす（false） */
+  setOff(ids: number[], off: boolean): void;
   /** リフトの配置で向きを回す */
   rotate(): void;
   liftTurn(l: Lift): void;
@@ -537,7 +539,7 @@ export function createHud(h: HudHandlers) {
     const rows: string[] = [];
     if (b.type === 'lab') rows.push(`<div class="row" data-k="lab"><span class="any">研究パック</span><div class="meter"><i></i></div><b></b></div>`);
     for (const id of inputsOf(s, b))
-      rows.push(`<div class="row" data-k="in:${id}">${itemImg(id)}<span>${ITEMS[id].name}${accepts(s, b, id) ? '' : '<small>（使わない）</small>'}</span><div class="meter"><i></i></div><b></b></div><p class="haul" data-h="${id}" hidden></p>`);
+      rows.push(`<div class="row" data-k="in:${id}">${itemImg(id)}<span>${ITEMS[id].name}${uses(s, b, id) ? '' : '<small>（使わない）</small>'}</span><div class="meter"><i></i></div><b></b></div><p class="haul" data-h="${id}" hidden></p>`);
     if (RECIPES_OF[b.type]) {
       rows.push(`<div class="row out" data-k="out"><span class="slot-it"></span><span class="out-name"></span><div class="meter"><i></i></div><b></b></div>`);
       rows.push(`<div class="row prog" data-k="prog"><i class="ic">${ICON.clock}</i><span>生産</span><div class="meter"><i></i></div><b></b></div>`);
@@ -558,9 +560,10 @@ export function createHud(h: HudHandlers) {
           .join('')}</div><p class="note">${b.recipe ? '猫はこのレシピの材料だけ運ぶ' : '自動: 入力に揃った材料から作れるものを順繰りに作る'}。使わない材料は倉庫へ戻します</p></div>`
       : '';
     pickOpen = false;
-    crewHtml = pickHtml = tierHtml = '';
+    crewHtml = pickHtml = tierHtml = runHtml = '';
     info.innerHTML = `<header>${thumbImg(`building:${b.type}`)}<div><h3>${def.name}</h3><span class="state"></span></div><button class="x" title="閉じる">${ICON.close}</button></header>
       <p class="desc">${DESC[b.type]}</p>${pickRecipe}${multi ? (b.recipe ? recipeRow(b.recipe, s) : '') : recipe(b.type, s)}
+      ${canPause(b) ? '<div class="run-box"></div>' : ''}
       <div class="stocks">${rows.join('')}</div>
       ${b.type === 'hq' ? `<div class="actions"><button class="btn" data-act="store">${ICON.box}<span>倉庫を開く</span></button><button class="btn" data-act="craft">${ICON.hammer}<span>手作業</span></button></div>` : ''}
       ${WORK_STAT[b.type] ? '<div class="crew"></div><div class="pick" hidden></div>' : ''}
@@ -589,7 +592,7 @@ export function createHud(h: HudHandlers) {
     if (cardKey(s, b, supplied) !== infoKey) return openInfo(b, s);
     const producer = !!RECIPES_OF[b.type];
     const full = outputFull(s, b);
-    const waiting = (producer || b.type === 'lab') && !b.running && !full && !hasInputs(s, b);
+    const waiting = (producer || b.type === 'lab') && !b.off && !b.running && !full && !hasInputs(s, b);
     const none = waiting && producer ? missingSources(s, b, supplied) : [];
     const fac = FACILITY[b.type];
     const used = fac ? facilityUsers(s, b) : 0;
@@ -599,7 +602,9 @@ export function createHud(h: HudHandlers) {
     const selling = Object.keys(s.sell).length;
     const [label, cls] = broken
       ? ['故障中', 'full']
-      : w
+      : b.off
+        ? ['停止中', 'off']
+        : w
         ? b.running
           ? ['射撃中', 'ok']
           : empty
@@ -677,8 +682,11 @@ export function createHud(h: HudHandlers) {
     setText(repair.querySelector('small b')!, fmt(rc));
     updateCrew(b, s);
     updateTier(b, s);
+    updateRun(b, s);
     const time = b.type === 'lab' ? 2 : recipeTime(b);
-    if (producer || b.type === 'lab') set('prog', b.running ? b.progress / time : 0, 1, `${Math.floor((b.running ? b.progress / time : 0) * 100)}%`);
+    // 止めている間は作りかけの進みのまま
+    const done = b.running || b.off ? b.progress / time : 0;
+    if (producer || b.type === 'lab') set('prog', done, 1, `${Math.floor(done * 100)}%`);
     let need: ItemId | null = null;
     if (waiting && producer) {
       const first = recipesOf(s, b)[0];
@@ -688,7 +696,9 @@ export function createHud(h: HudHandlers) {
       info.querySelector('.hint')!,
       broken
         ? '故障中は動きません。猫も品物を運びません。修理すると元に戻ります'
-        : w
+        : b.off
+          ? `止めています。材料は受け取らず、できた品は運び出されます${b.progress > 0 && b.type !== 'lab' ? '（作りかけは動かすと続きから）' : ''}`
+          : w
           ? `射程 ${weaponRange(b)}・ダメージ ${Math.round(weaponDamage(s, b))}。${empty ? `${ITEMS[w.ammo!].name}を運んでもらうと撃てます（組立機で作るか、本部の在庫から配られます）` : '射程内で本部に一番近い犬を狙います'}`
           : b.type === 'hq'
             ? `次の襲撃まで ${clock(s.raid.next)}。届け先のない品はここへ運ばれ、確保数を超える分は必要な機械へ配られます`
@@ -808,6 +818,31 @@ export function createHud(h: HudHandlers) {
     }`;
     if (html !== tierHtml) box.innerHTML = tierHtml = html;
   }
+  /** 稼働の切り替え: この建物と、同じ設定（種類・レシピ。採掘機は鉱石）の建物をまとめて */
+  let runHtml = '';
+  /** まとめて切り替える建物の説明（「赤パックを作る組立機」「鉄鉱石の採掘機」「自動の石の炉」） */
+  const setupName = (b: Building) => {
+    const name = BUILDINGS[b.type].name;
+    if (b.type === 'miner') return b.out ? `${ITEMS[b.out].name}の${name}` : name;
+    if (!MULTI_RECIPE.includes(b.type)) return name;
+    const out = b.recipe && RECIPES[b.recipe].out;
+    return out ? `${ITEMS[out].name}を作る${name}` : `自動の${name}`;
+  };
+  const group = (s: GameState, b: Building) => s.buildings.filter((x) => sameSetup(x, b));
+  function updateRun(b: Building, s: GameState) {
+    const box = info.querySelector<HTMLElement>('.run-box');
+    if (!box) return;
+    const all = group(s, b);
+    const off = all.filter((x) => x.off).length;
+    const html = `<button class="btn wide ${b.off ? 'primary' : ''}" data-act="off">${b.off ? `${ICON.play}<span>動かす</span>` : `${ICON.pause}<span>止める</span>`}</button>${
+      all.length > 1
+        ? `<p class="note">同じ設定の${setupName(b)}: ${all.length} 棟（停止中 ${off}）</p><div class="actions">${
+            off < all.length ? `<button class="btn" data-act="offAll">${ICON.pause}<span>全部止める</span></button>` : ''
+          }${off ? `<button class="btn" data-act="onAll">${ICON.play}<span>全部動かす</span></button>` : ''}</div>`
+        : ''
+    }<p class="note">止めると材料を受け取らず、入っていた材料は倉庫へ戻します。ほかの建物に材料を回したいときに</p>`;
+    if (html !== runHtml) box.innerHTML = runHtml = html;
+  }
   info.addEventListener('click', (e) => {
     const t = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
     if (!t) return;
@@ -836,6 +871,13 @@ export function createHud(h: HudHandlers) {
         break;
       case 'recipe':
         if (b) h.recipe(b, (t.dataset.r || null) as RecipeId | null);
+        break;
+      case 'off':
+        if (b) h.setOff([b.id], !b.off);
+        break;
+      case 'offAll':
+      case 'onAll':
+        if (b) h.setOff(group(s, b).map((x) => x.id), t.dataset.act === 'offAll');
         break;
       case 'store':
         h.store();

@@ -4,7 +4,7 @@ import { assignJobs, inputTotal } from './haul';
 import { buildLifts, liftTick, type LiftGraph } from './lift';
 import { bfs, occupancy, type Bfs } from './path';
 import { heal, nearestDog, raidTick } from './raid';
-import { accepts, addStore, bufferCap, catSpeedOf, endRest, facilityCap, facilityRecover, fatigueRate, gridSize, isBroken, isWeapon, isWorking, labBonus, marketRate, productionSpeed, rand, recipesOf, repath, statBonus, statLevel, stock, storeCap, tierSpeed, tradeMultiplier, TUTORIAL, type Building, type Cat, type GameState, type Rest } from './state';
+import { accepts, addStore, bufferCap, catSpeedOf, endRest, facilityCap, facilityRecover, fatigueRate, gridSize, isBroken, isWeapon, isWorking, labBonus, marketRate, productionSpeed, rand, recipesOf, repath, statBonus, statLevel, stock, storeCap, tierSpeed, toStore, tradeMultiplier, TUTORIAL, type Building, type Cat, type GameState, type Rest } from './state';
 
 /**
  * 市場への納品と研究所の消費（浮遊テキスト用）、猫のステータスの Lv UP（cat と stat 付き）、襲撃の出来事。
@@ -145,11 +145,11 @@ export function hasInputs(s: GameState, b: Building) {
   return recipesOf(s, b).some((id) => (Object.keys(RECIPES[id].in) as ItemId[]).every((i) => (b.input[i] ?? 0) >= RECIPES[id].in[i]!));
 }
 /** 出力が満杯で止まっている */
-export const outputFull = (s: GameState, b: Building) => !!RECIPES_OF[b.type] && !b.running && b.output > 0 && hasInputs(s, b) && !ready(s, b);
+export const outputFull = (s: GameState, b: Building) => !!RECIPES_OF[b.type] && !b.off && !b.running && b.output > 0 && hasInputs(s, b) && !ready(s, b);
 
 function produce(s: GameState, b: Building, dt: number, events: GameEvent[]) {
-  // 故障中は止まる（途中の進みは残る）
-  if (isBroken(b)) return;
+  // 故障中・止めている間は止まる（途中の進みは残る）
+  if (isBroken(b) || b.off) return;
   if (b.type === 'lab') return research(s, b, dt, events);
   if (!RECIPES_OF[b.type]) return;
   if (!b.running) {
@@ -819,7 +819,8 @@ function arrive(s: GameState, ctx: Ctx, cat: Cat, events: GameEvent[]) {
   // ponytail: 届け先が故障していたら荷物は諦める（届け先の選び直しはしない）
   if (dst && cat.item && !isBroken(dst)) {
     if (dst.type === 'hq') addStore(s, cat.item, cat.amount);
-    else dst.input[cat.item] = (dst.input[cat.item] ?? 0) + cat.amount;
+    // 運んでいる間に止められた建物の分は本部へ（入らなければ建物に置く）
+    else dst.input[cat.item] = (dst.input[cat.item] ?? 0) + cat.amount - (dst.off ? toStore(s, cat.item, cat.amount) : 0);
   }
   // 届けた分は入力に入ったので、空きは変わらない（届け先の選び直しは要らない）
   if (cat.item) ctx.addIncoming(cat.dst, cat.item, -cat.amount);

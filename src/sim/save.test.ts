@@ -52,7 +52,7 @@ describe('save', () => {
     expect(s.buildings.map((b) => b.type)).toEqual(['hq']);
     expect(s.store).toEqual({ ironPlate: 60, gear: 20, stone: 40, brick: 10, coal: 30 });
     expect(s.ores.some((o) => Math.max(Math.abs(o.x + 0.5), Math.abs(o.y + 0.5)) > 14)).toBe(true);
-    expect(s.raid).toEqual({ next: 480, wave: 0, tip: false, cur: null });
+    expect(s.raid).toEqual({ next: 900, wave: 0, tip: false, cur: null });
     expect(s.cats).toHaveLength(1);
     expect(s.cats[0]).toMatchObject({ id: 7, name: 'みけ', color: 'calico', good: 'fish', bad: 'study', temper: 'calm', state: 'idle', item: null, job: 0, rest: null, restAt: 0, x: 0, y: 0, robot: false });
     expect(s.cats[0].stats).toMatchObject({ leg: 40, fish: 61, brave: 9 });
