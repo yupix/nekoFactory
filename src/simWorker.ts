@@ -1,5 +1,5 @@
 import type { BuildingType, HandId, InfiniteId, ItemId, RecipeId, ResearchId } from './sim/data';
-import { assignCat, buyResearch, cancelHand, expandIsland, hireCat, launchRobot, markCraftTip, placeBuilding, queueHand, placeLifts, removeBuilding, renameCat, repairAll, repairBuilding, setKeep, setRecipe, setSell, unassignCat, upgradeBuilding, upgradeLift, wakeCat, type GameState } from './sim/state';
+import { assignCat, buyResearch, cancelHand, expandIsland, hireCat, launchRobot, markCraftTip, placeBuilding, queueHand, placeLifts, removeBuilding, renameCat, repairAll, repairBuilding, setKeep, setOff, setRecipe, setSell, unassignCat, upgradeBuilding, upgradeLift, wakeCat, type GameState } from './sim/state';
 import { tick, type GameEvent } from './sim/tick';
 import { keepCat } from './sim/away';
 
@@ -9,6 +9,7 @@ export type Action =
   | { kind: 'lifts'; tiles: { x: number; y: number; d: number }[] }
   | { kind: 'upgradeLift'; x: number; y: number; all: boolean }
   | { kind: 'recipe'; id: number; recipe: RecipeId | null }
+  | { kind: 'off'; ids: number[]; off: boolean }
   | { kind: 'sell'; item: ItemId; on: boolean; keep: number }
   | { kind: 'keep'; item: ItemId; n: number }
   | { kind: 'robot' }
@@ -57,6 +58,8 @@ function apply(a: Action) {
       return upgradeLift(s, a.x, a.y, a.all);
     case 'recipe':
       return setRecipe(s, a.id, a.recipe);
+    case 'off':
+      return setOff(s, a.ids, a.off);
     case 'sell':
       return setSell(s, a.item, a.on, a.keep);
     case 'keep':

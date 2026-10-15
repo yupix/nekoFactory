@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ITEM_IDS } from './data';
 import { parseSave } from './save';
 import { outputStatus } from './haul';
-import { assignCat, buyResearch, cancelHand, handPlan, initialState, launchRobot, missingSources, placeBuilding, placeLift, queueHand, removeBuilding, setRecipe, sourceHint, stock, storeCap, type GameState } from './state';
+import { accepts, assignCat, buyResearch, cancelHand, handPlan, initialState, launchRobot, missingSources, placeBuilding, placeLift, queueHand, removeBuilding, setOff, setRecipe, sourceHint, stock, storeCap, suppliedItems, type GameState } from './state';
 import { tick } from './tick';
 import userSave from './fixtures/user-save-iron-to-hq.json?raw';
 
@@ -605,5 +605,99 @@ describe('本部の手作業', () => {
     expect(outputStatus(s, m)).toBe('倉庫がいっぱいです');
     for (const [x, y] of [[1, 0], [3, 0], [2, 1], [2, -1]]) placeBuilding(s, 'fence', x, y);
     expect(outputStatus(s, m)).toBe('道が通じていません');
+  });
+});
+
+describe('建物の停止', () => {
+  it('止めた建物は作らず、材料を受け取らない。入っていた材料は倉庫へ戻り、動かすと作りかけの続きから作る', () => {
+    const s = bare(false);
+    placeBuilding(s, 'assembler', 0, 0, 'gear');
+    const asm = s.buildings[0];
+    asm.input = { ironPlate: 5 };
+    s.store = {};
+    run(s, 1);
+    // 歯車を作りかけ（鉄板 2 枚は使った）
+    expect(asm).toMatchObject({ running: true, input: { ironPlate: 3 } });
+    expect(setOff(s, [asm.id], true)).toBeNull();
+    expect(asm).toMatchObject({ off: true, running: false, input: { ironPlate: 0 } });
+    expect(stock(s, 'ironPlate')).toBe(3);
+    expect(accepts(s, asm, 'ironPlate')).toBe(false);
+    run(s, 10);
+    expect(asm.output).toBe(0);
+    expect(asm.progress).toBeCloseTo(1, 5);
+    expect(setOff(s, [asm.id], false)).toBeNull();
+    expect(asm.off).toBeUndefined();
+    expect(asm.running).toBe(true);
+    run(s, 1);
+    expect(asm).toMatchObject({ output: 1, out: 'gear', running: false });
+  });
+
+  it('止めた組立機には本部の鉄板が配られず、動いている弾丸の組立機へ回る', () => {
+    const s = initialState(4);
+    s.cats.length = 1;
+    s.ores = [];
+    s.researched.push('steel', 'def1');
+    placeBuilding(s, 'assembler', 3, 0, 'gear');
+    placeBuilding(s, 'assembler', -3, 0, 'bullet');
+    const [, gear, bullet] = s.buildings;
+    s.store = { ironPlate: 30 };
+    setOff(s, [gear.id], true);
+    run(s, 120);
+    expect(gear.input.ironPlate ?? 0).toBe(0);
+    expect(gear.output).toBe(0);
+    // 確保数 10 を超える 20 枚は弾丸 40 発になった（本部へ運ばれたか、出力・入力に残っている）
+    expect(stock(s, 'ironPlate')).toBe(10);
+    expect(stock(s, 'bullet') + bullet.output + 2 * (bullet.input.ironPlate ?? 0)).toBe(40);
+  });
+
+  it('止める前に運び始めた材料は、届いたときに倉庫へ戻す', () => {
+    const s = initialState(4);
+    s.cats.length = 1;
+    s.ores = [];
+    placeBuilding(s, 'assembler', 4, 0, 'gear');
+    const asm = s.buildings[1];
+    s.store = { ironPlate: 30 };
+    const cat = s.cats[0];
+    for (let i = 0; i < 300 && !(cat.state === 'toDest' && cat.dst === asm.id); i++) tick(s, DT);
+    expect(cat.state).toBe('toDest');
+    const carried = cat.amount;
+    const before = stock(s, 'ironPlate');
+    setOff(s, [asm.id], true);
+    for (let i = 0; i < 300 && cat.state !== 'idle'; i++) tick(s, DT);
+    expect(asm.input.ironPlate ?? 0).toBe(0);
+    expect(stock(s, 'ironPlate')).toBe(before + carried);
+  });
+
+  it('リフトも止めた建物には品を入れず、手前で詰まる', () => {
+    const s = withHq();
+    s.researched.push('steel', 'lift');
+    placeBuilding(s, 'fishing', 2, 2);
+    for (const x of [3, 4, 5]) placeLift(s, x, 2, 0);
+    placeBuilding(s, 'cannery', 6, 2);
+    const b = s.buildings[2];
+    setOff(s, [b.id], true);
+    run(s, 20);
+    expect(b.input.fish ?? 0).toBe(0);
+    expect(s.lifts.reduce((a, l) => a + l.items.length, 0)).toBeGreaterThan(0);
+    setOff(s, [b.id], false);
+    run(s, 2);
+    expect(b.input.fish).toBeGreaterThan(0);
+  });
+
+  it('まとめて止められる。本部や市場は止められない。止めた建物は供給元に数えない', () => {
+    const s = bare(false);
+    placeBuilding(s, 'assembler', 0, 0, 'gear');
+    placeBuilding(s, 'assembler', 2, 0, 'gear');
+    placeBuilding(s, 'market', 4, 0);
+    const [a, b, m] = s.buildings;
+    s.store = {};
+    a.input = { ironPlate: 4 };
+    expect(suppliedItems(s).has('gear')).toBe(true);
+    expect(setOff(s, [a.id, b.id, m.id], true)).toBeNull();
+    expect([a.off, b.off, m.off]).toEqual([true, true, undefined]);
+    expect(suppliedItems(s).has('gear')).toBe(false);
+    expect(setOff(s, [m.id], true)).toBe('止められる建物がありません');
+    expect(setOff(s, [a.id, b.id], false)).toBeNull();
+    expect([a.off, b.off]).toEqual([undefined, undefined]);
   });
 });

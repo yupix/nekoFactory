@@ -85,8 +85,8 @@ interface Dying {
 }
 
 const TYPES = Object.keys(BUILDINGS) as BuildingType[];
-/** 吹き出し: 出力満杯・不足アイテム・故障（工具）・弾切れ */
-const ICONS = ['!', ...ITEM_IDS, 'tool', 'ammo', 'none'] as const;
+/** 吹き出し: 出力満杯・不足アイテム・故障（工具）・弾切れ・材料なし・停止中 */
+const ICONS = ['!', ...ITEM_IDS, 'tool', 'ammo', 'none', 'pause'] as const;
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
 function cobbleTexture() {
@@ -141,7 +141,7 @@ function iconAtlas() {
     g.shadowColor = 'rgba(0,0,0,0.25)';
     g.shadowBlur = 8;
     g.shadowOffsetY = 3;
-    g.fillStyle = icon === 'tool' ? '#f0a33c' : icon === 'none' ? '#e5574a' : warn ? '#ff6b4a' : '#ffffff';
+    g.fillStyle = icon === 'tool' ? '#f0a33c' : icon === 'none' ? '#e5574a' : icon === 'pause' ? '#7f8a96' : warn ? '#ff6b4a' : '#ffffff';
     g.beginPath();
     g.roundRect(12, 8, 104, 92, 30);
     g.moveTo(52, 96);
@@ -150,7 +150,7 @@ function iconAtlas() {
     g.fill();
     g.shadowColor = 'transparent';
     g.lineWidth = 6;
-    g.strokeStyle = warn || icon === 'none' ? '#ffffff' : icon === 'ammo' ? '#e5574a' : '#ffb98a';
+    g.strokeStyle = warn || icon === 'none' || icon === 'pause' ? '#ffffff' : icon === 'ammo' ? '#e5574a' : '#ffb98a';
     g.beginPath();
     g.roundRect(15, 11, 98, 86, 27);
     g.stroke();
@@ -196,6 +196,13 @@ function iconAtlas() {
       g.textBaseline = 'middle';
       g.fillText('材料', 64, 38);
       g.fillText('なし', 64, 74);
+    } else if (icon === 'pause') {
+      // プレイヤーが止めた建物（一時停止の記号）
+      g.fillStyle = '#fff';
+      g.beginPath();
+      g.roundRect(40, 28, 17, 52, 6);
+      g.roundRect(71, 28, 17, 52, 6);
+      g.fill();
     } else if (warn) {
       g.fillStyle = '#fff';
       g.font = '900 78px "M PLUS Rounded 1c", "Arial Rounded MT Bold", sans-serif';
@@ -860,7 +867,8 @@ export function createBuildings(parent: THREE.Object3D, items: Items, fx: Fx, no
         if (b.type !== 'fence') pads.push(T.compose(v.set(b.x + 0.5, 0, b.y + 0.5), quat(0, 0, 0), sc.set(Math.max(growXZ, 1e-3), 1, Math.max(growXZ, 1e-3))));
         const cap = bufferCap(b);
         const shown = Math.max(0, Math.min(cap, b.output + (reserved.get(b.id) ?? 0) - st.flying));
-        if (def.time && st.prevRunning && (!b.running || b.progress < st.prevProgress - 1e-6) && b.type !== 'lab') {
+        // 止めたときは作りかけのまま止まるので、できあがりの演出は出さない
+        if (def.time && st.prevRunning && (!b.running || b.progress < st.prevProgress - 1e-6) && b.type !== 'lab' && !b.off) {
           st.catchT = 0;
           complete(st, b, shown);
         }
@@ -889,13 +897,15 @@ export function createBuildings(parent: THREE.Object3D, items: Items, fx: Fx, no
           hpBars.set('aBar', j, st.hpShown, Math.min(1, (1 - st.hpShown) * 40));
         }
         const full = outputFull(s, b);
-        const waiting = !full && !broken && !!RECIPES_OF[b.type] && !b.running && !hasInputs(s, b);
+        const paused = !!b.off && !broken;
+        const waiting = !full && !broken && !paused && !!RECIPES_OF[b.type] && !b.running && !hasInputs(s, b);
         const ammo = WEAPONS[b.type]?.ammo;
         const empty = !!ammo && (b.input[ammo] ?? 0) < 1;
         const none = waiting && missingSources(s, b, (supplied ??= suppliedItems(s))).length > 0;
-        if (broken || full || waiting || empty) {
+        if (broken || full || waiting || empty || paused) {
           let icon = 0;
           if (broken) icon = ICONS.indexOf('tool');
+          else if (paused) icon = ICONS.indexOf('pause');
           else if (empty) icon = ICONS.indexOf('ammo');
           else if (none) icon = ICONS.indexOf('none');
           else if (waiting) {

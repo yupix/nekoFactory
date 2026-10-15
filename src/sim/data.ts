@@ -179,7 +179,7 @@ export const DOGS: Record<DogKind, { name: string; speed: number; hp: number; at
  * 襲撃: 初回までの秒数・間隔・上陸から退却までの秒数・犬の基本速度（タイル/秒）・
  * 猫が逃げる距離と秒数・逃げない勇敢の値
  */
-export const RAID = { first: 480, every: 300, limit: 120, dogSpeed: 1.4, flee: 2.5, fleeT: 2, brave: 50 };
+export const RAID = { first: 900, every: 300, limit: 120, dogSpeed: 1.4, flee: 2.5, fleeT: 2, brave: 50 };
 /** 敷地の外側に広がる野原と砂浜の幅（タイル）。船はこの外の海に着く */
 export const RING = 7.5;
 

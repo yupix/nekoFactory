@@ -821,7 +821,7 @@ export function createCats(parent: THREE.Object3D, items: Items, fx: Fx, sound: 
           const time = recipeTime(job);
           const rate = productionSpeed(st) * tierSpeed(job) * (bonus.get(job.id) ?? 1);
           const prog = job.running && time ? Math.min(1, (job.progress + alpha * 0.1 * rate) / time) : 0;
-          if (prog < w.wprog - 0.3) w.doneT = now;
+          if (prog < w.wprog - 0.3 && !job.off) w.doneT = now;
           w.wprog = prog;
           w.wrun += ((job.running ? 1 : 0) - w.wrun) * damp(4, dt);
           const good = c.good === WORK_STAT[job.type];

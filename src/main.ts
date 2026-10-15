@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { BUILDINGS, HAND, INFINITE, ITEMS, LIFT, RESEARCH, STATS, type BuildingType, type HandId, type ItemId } from './sim/data';
 import { keepCat } from './sim/away';
 import { clearSave, importSave, loadGame, saveGame, serialize } from './sim/save';
-import { assignCat, buildingAt, buildingCost, buyResearch, canAfford, cancelHand, carrierCount, costText, expandIsland, gridSize, has, hireCat, isInfinite, isLeaving, launchRobot, level, liftAt, markCraftTip, missing, placeBlocker, placeBuilding, placeLifts, queueHand, refundOf, removeBuilding, renameCat, repairAll, repairBuilding, setKeep, setRecipe, setSell, traitText, TUTORIAL, unassignCat, upgradeBuilding, upgradeLift, wakeCat, type Building, type Cat, type GameState, type Lift } from './sim/state';
+import { assignCat, buildingAt, buildingCost, buyResearch, canAfford, cancelHand, carrierCount, costText, expandIsland, gridSize, has, hireCat, isInfinite, isLeaving, launchRobot, level, liftAt, markCraftTip, missing, placeBlocker, placeBuilding, placeLifts, queueHand, refundOf, removeBuilding, renameCat, repairAll, repairBuilding, setKeep, setOff, setRecipe, setSell, traitText, TUTORIAL, unassignCat, upgradeBuilding, upgradeLift, wakeCat, type Building, type Cat, type GameState, type Lift } from './sim/state';
 import type { GameEvent } from './sim/tick';
 import type { Action, FromWorker, ToWorker } from './simWorker';
 import type { Sfx } from './ui/audio';
@@ -307,6 +307,9 @@ const hud = createHud({
   },
   recipe(b, recipe) {
     if (act({ kind: 'recipe', id: b.id, recipe }, (s) => setRecipe(s, b.id, recipe), 'select')) saveSoon();
+  },
+  setOff(ids, off) {
+    if (act({ kind: 'off', ids, off }, (s) => setOff(s, ids, off), 'select')) saveSoon();
   },
   rotate: () => rotateLift(),
   liftTurn(l) {

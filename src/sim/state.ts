@@ -21,6 +21,8 @@ export interface Building {
   tier: number;
   /** 耐久。0 で故障（生産・運搬・発射が止まる） */
   hp: number;
+  /** プレイヤーが止めた（生産せず、材料も受け取らない。出力は運び出す） */
+  off?: boolean;
   /** 兵器の次の発射までの秒数 */
   cd?: number;
   /** リフトへ積む間隔の経過秒と、次に積むリフトの順番（市場は次に売る品の順番） */
@@ -522,8 +524,10 @@ export function recipeTime(b: Building) {
   const id = b.cur ?? b.recipe ?? RECIPES_OF[b.type]?.[0];
   return id ? RECIPES[id].time : BUILDINGS[b.type].time;
 }
-/** 建物がその品を入力に受け取るか（研究所は研究パック、兵器は弾、本部は何でも、生産建物は作れるレシピの材料） */
-export function accepts(s: GameState, b: Building, item: ItemId) {
+/** 建物がその品を入力に受け取るか。止めた建物は何も受け取らない */
+export const accepts = (s: GameState, b: Building, item: ItemId) => b.type === 'hq' || (!b.off && uses(s, b, item));
+/** 建物がその品を使うか（研究所は研究パック、兵器は弾、本部は何でも、生産建物は作れるレシピの材料） */
+export function uses(s: GameState, b: Building, item: ItemId) {
   if (b.type === 'hq') return true;
   if (b.type === 'lab') return !!ITEMS[item].rp;
   const w = WEAPONS[b.type];
@@ -605,13 +609,43 @@ export function setRecipe(s: GameState, id: number, recipe: RecipeId | null): st
   if (!MULTI_RECIPE.includes(b.type)) return 'レシピを選べない建物です';
   if (recipe && (RECIPES[recipe].b !== b.type || !recipeUnlocked(s, recipe))) return '未解放のレシピです';
   b.recipe = recipe;
-  // 新しいレシピで使わない入力は本部へ戻す（本部が満杯なら入るだけ戻し、残りは建物に残す）
-  for (const i of Object.keys(b.input) as ItemId[]) {
-    const n = b.input[i] ?? 0;
-    if (n <= 0 || accepts(s, b, i)) continue;
-    const k = Math.min(n, Math.max(0, storeCap(s) - stock(s, i)));
-    s.store[i] = stock(s, i) + k;
-    b.input[i] = n - k;
+  // 新しいレシピで使わない入力は本部へ戻す（止めている建物は全部）
+  for (const i of Object.keys(b.input) as ItemId[]) if (!accepts(s, b, i)) b.input[i] = (b.input[i] ?? 0) - toStore(s, i, b.input[i] ?? 0);
+  s.rev++;
+  return null;
+}
+
+/** 本部の倉庫へ入るだけ入れ、入れた数を返す（満杯なら残りは呼び出し側に残す） */
+export function toStore(s: GameState, item: ItemId, n: number) {
+  const k = Math.max(0, Math.min(n, storeCap(s) - stock(s, item)));
+  s.store[item] = stock(s, item) + k;
+  return k;
+}
+
+/** 止めたり動かしたりできる建物（生産建物と研究所） */
+export const canPause = (b: Building) => !!RECIPES_OF[b.type] || b.type === 'lab';
+/** まとめて止める・動かす仲間: 同じ種類で、同じレシピ（採掘機は同じ鉱石） */
+export const sameSetup = (a: Building, b: Building) => a.type === b.type && a.recipe === b.recipe && (a.type !== 'miner' || a.out === b.out);
+
+/**
+ * 建物を止める（off）・動かす。止めた建物は生産せず、猫もリフトも材料を届けない。入っていた材料は本部へ戻す（本部が満杯なら建物に残る）。
+ * 作りかけは材料ごと残し、動かすと続きから作る。出力の品はそのまま運び出される
+ */
+export function setOff(s: GameState, ids: number[], off: boolean): string | null {
+  const list = s.buildings.filter((b) => ids.includes(b.id) && canPause(b));
+  if (!list.length) return '止められる建物がありません';
+  for (const b of list) {
+    if (!!b.off === off) continue;
+    if (off) {
+      b.off = true;
+      b.running = false;
+      // 研究所はパックを RP にし終えるまで消費しないので、進みは捨てる
+      if (b.type === 'lab') b.progress = 0;
+      for (const i of Object.keys(b.input) as ItemId[]) b.input[i] = (b.input[i] ?? 0) - toStore(s, i, b.input[i] ?? 0);
+    } else {
+      delete b.off;
+      if (b.type !== 'lab' && b.cur && b.progress > 0) b.running = true;
+    }
   }
   s.rev++;
   return null;
@@ -630,11 +664,11 @@ export function setKeep(s: GameState, item: ItemId, n: number): string | null {
 export function suppliedItems(s: GameState): Set<ItemId> {
   const set = new Set<ItemId>();
   for (const id of ITEM_IDS) if (stock(s, id) > keepOf(s, id)) set.add(id);
-  for (const b of s.buildings) if (b.out && (b.type === 'miner' || b.output > 0)) set.add(b.out);
+  for (const b of s.buildings) if (b.out && ((b.type === 'miner' && !b.off) || b.output > 0)) set.add(b.out);
   for (let grew = true; grew; ) {
     grew = false;
     for (const b of s.buildings)
-      for (const id of recipesOf(s, b)) {
+      for (const id of b.off ? [] : recipesOf(s, b)) {
         const r = RECIPES[id];
         if (!r.out || set.has(r.out)) continue;
         if ((Object.keys(r.in) as ItemId[]).every((i) => set.has(i) || (b.input[i] ?? 0) >= r.in[i]!)) {
