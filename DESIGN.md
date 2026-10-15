@@ -10,6 +10,7 @@
 - 3D モデルは外部アセットを使わず、ジオメトリ合成・頂点カラー・Canvas テクスチャ・シェーダーで手続き生成。ライティング、影、ポストプロセス（ブルーム・AO・ビネット）、合成サウンドあり
 - テストは vitest。`src/sim` のみ対象（three 非依存）
 - 依存は `three` と dev の `vite` `typescript` `vitest` `@types/three` だけ
+- 公開は GitHub Pages。main への push で `.github/workflows/pages.yml` がテスト・ビルドして `dist` を公開する。サブパス（`/nekoFactory/`）で開けるよう、Vite の `base` は相対（`./`）
 
 ## 構成
 
