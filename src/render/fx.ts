@@ -48,11 +48,11 @@ function glowTexture() {
   return new THREE.CanvasTexture(c);
 }
 
-/** 柔らかいスプライトのアトラス: 0 煙・土煙の丸 / 1 寝息の Z / 2 ハート */
+/** 柔らかいスプライトのアトラス: 0 煙・土煙の丸 / 1 寝息の Z / 2 ハート / 3 「…」の吹き出し */
 function softTexture() {
   const n = 64;
   const c = document.createElement('canvas');
-  c.width = n * 3;
+  c.width = n * 4;
   c.height = n;
   const g = c.getContext('2d')!;
   const base = g.createRadialGradient(n / 2, n / 2, 0, n / 2, n / 2, n / 2);
@@ -91,10 +91,27 @@ function softTexture() {
   g.fillStyle = '#ffffff';
   g.fill();
   g.restore();
+  // 「…」の吹き出し（白い丸に、しっぽと灰色の 3 点）
+  g.save();
+  g.translate(n * 3.5, n / 2);
+  g.beginPath();
+  g.ellipse(0, -4, 27, 20, 0, 0, Math.PI * 2);
+  g.moveTo(-8, 12);
+  g.lineTo(-16, 27);
+  g.lineTo(4, 14);
+  g.fillStyle = '#ffffff';
+  g.fill();
+  g.fillStyle = '#6a7080';
+  for (const x of [-12, 0, 12]) {
+    g.beginPath();
+    g.arc(x, -3, 4.2, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.restore();
   return new THREE.CanvasTexture(c);
 }
 
-type Kind = 'smoke' | 'dust' | 'drop' | 'ripple' | 'spark' | 'glow' | 'coin' | 'zzz' | 'heart';
+type Kind = 'smoke' | 'dust' | 'drop' | 'ripple' | 'spark' | 'glow' | 'coin' | 'zzz' | 'heart' | 'dots';
 interface P {
   kind: Kind;
   p: THREE.Vector3;
@@ -118,8 +135,8 @@ interface Fly {
   done?: () => void;
 }
 
-const GRAV: Record<Kind, number> = { smoke: 0, dust: 0, drop: -6, ripple: 0, spark: 0, glow: 0, coin: -7.5, zzz: 0, heart: 0 };
-const DRAG: Record<Kind, number> = { smoke: 0.6, dust: 4, drop: 0.2, ripple: 0, spark: 1.5, glow: 1.2, coin: 0.4, zzz: 0.3, heart: 1.2 };
+const GRAV: Record<Kind, number> = { smoke: 0, dust: 0, drop: -6, ripple: 0, spark: 0, glow: 0, coin: -7.5, zzz: 0, heart: 0, dots: 0 };
+const DRAG: Record<Kind, number> = { smoke: 0.6, dust: 4, drop: 0.2, ripple: 0, spark: 1.5, glow: 1.2, coin: 0.4, zzz: 0.3, heart: 1.2, dots: 2 };
 
 /** 煙・土煙・水しぶき・波紋・キラキラ・コイン・飛んでいくアイテム */
 export function createFx(parent: THREE.Object3D, items: Items, noAO: (o: THREE.Object3D) => void) {
@@ -165,7 +182,7 @@ export function createFx(parent: THREE.Object3D, items: Items, noAO: (o: THREE.O
       varying vec3 vCol;
       varying float vAlpha;
       void main() {
-        vUv = vec2((uv.x + aSprite.z) / 3.0, uv.y);
+        vUv = vec2((uv.x + aSprite.z) / 4.0, uv.y);
         vAlpha = aSprite.y;
         vCol = vec3(1.0);
         #ifdef USE_INSTANCING_COLOR
@@ -244,6 +261,12 @@ export function createFx(parent: THREE.Object3D, items: Items, noAO: (o: THREE.O
       list[list.length - 1].rot = rand(-0.3, 0.1);
       list[list.length - 1].spin = rand(-0.4, 0.4);
     },
+    /** 落ち込んだ猫の頭上の「…」 */
+    dots(p: THREE.Vector3) {
+      add('dots', p, new THREE.Vector3(0, 0.12, 0), 1.5, 0.17, 0xffffff);
+      list[list.length - 1].rot = 0;
+      list[list.length - 1].spin = 0;
+    },
     /** 撫でたときのハート */
     hearts(p: THREE.Vector3, n = 5) {
       for (let i = 0; i < n; i++) {
@@ -295,10 +318,11 @@ export function createFx(parent: THREE.Object3D, items: Items, noAO: (o: THREE.O
             break;
           }
           case 'zzz':
-          case 'heart': {
-            const grow = p.kind === 'zzz' ? 0.6 + 0.9 * t : 0.7 + 0.5 * Math.sin(Math.min(1, t * 3) * Math.PI * 0.5);
+          case 'heart':
+          case 'dots': {
+            const grow = p.kind === 'zzz' ? 0.6 + 0.9 * t : p.kind === 'dots' ? Math.min(1, 0.5 + t * 6) : 0.7 + 0.5 * Math.sin(Math.min(1, t * 3) * Math.PI * 0.5);
             const i2 = soft.push(m.compose(p.p, q.identity(), s.setScalar(p.size * grow)));
-            soft.set('aSprite', i2, p.rot, Math.min(1, t * 5) * (1 - t * t), p.kind === 'zzz' ? 1 : 2);
+            soft.set('aSprite', i2, p.rot, Math.min(1, t * 5) * (1 - t ** 4), p.kind === 'zzz' ? 1 : p.kind === 'heart' ? 2 : 3);
             soft.color(i2, p.color);
             break;
           }

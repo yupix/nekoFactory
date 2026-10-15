@@ -1,5 +1,5 @@
 import { INFINITE, RESEARCH, type InfiniteId, type ResearchId } from '../sim/data';
-import { infiniteCost, isInfinite, level, researchBlocker, type GameState } from '../sim/state';
+import { awayResearch, infiniteCost, isInfinite, level, researchBlocker, type GameState } from '../sim/state';
 import type { GameAudio } from './audio';
 import { fmt, replay, thumbImg } from './hud';
 import { ICON } from './icons';
@@ -7,25 +7,37 @@ import { ICON } from './icons';
 type Id = ResearchId | InfiniteId;
 /** 系列ごとの行。列は前提の深さ（無限研究は右端） */
 const ROWS: { label: string; ids: (Id | null)[] }[] = [
-  { label: '新しい品物', ids: ['pack', 'yarn', 'luxury', null] },
-  { label: '交渉', ids: [null, 'tradeInf', null, null] },
-  { label: '招き猫', ids: [null, 'maneki', null, null] },
+  { label: 'ものづくり', ids: ['steel', 'bluePack', null, null] },
+  { label: '運搬', ids: [null, 'robot', null, null] },
+  { label: 'リフト', ids: [null, 'lift', 'fastLift', null] },
+  { label: '倉庫', ids: ['storage', 'maneki', null, 'tradeInf'] },
   { label: '速足', ids: ['speed1', 'speed2', 'speed3', 'speedInf'] },
   { label: '大荷物', ids: ['cargo1', 'cargo2', null, 'cargoInf'] },
   { label: '効率', ids: ['eff1', 'eff2', 'eff3', 'effInf'] },
   { label: 'やる気', ids: ['motiv1', 'motiv2', 'motiv3', 'motivInf'] },
   { label: '休憩', ids: [null, 'tower', null, null] },
+  { label: '居心地', ids: [null, 'comfort1', 'comfort2', 'comfort3'] },
+  { label: '', ids: [null, null, null, 'collarInf'] },
   { label: '増築', ids: [null, 'tier2', 'tier3', null] },
   { label: '猫の群れ', ids: ['herd1', 'herd2', null, null] },
+  { label: '防衛', ids: [null, 'def1', 'def2', 'fireInf'] },
+  { label: '頑丈', ids: [null, null, 'sturdy1', 'sturdy2'] },
+  { label: '', ids: ['sturdy3', 'sturdyInf', null, 'selfRepair'] },
+  { label: '修理', ids: [null, null, null, 'cheapRepair'] },
 ];
+/** 家出の発生率を下げる研究（説明に今の倍率を出す） */
+const AWAY_IDS: Id[] = ['comfort1', 'comfort2', 'comfort3', 'collarInf'];
 const reqOf = (id: Id) => (isInfinite(id) ? INFINITE[id].req : RESEARCH[id].req);
 
 /** 研究ツリー。前提を線でつなぎ、買えないものは理由を出す。無限研究はレベルと次のコストを出す */
 export function createResearchPanel(o: { buy(id: Id): void; audio: GameAudio }) {
   const ICONS: Record<Id, string> = {
-    pack: thumbImg('building:packer'),
-    yarn: thumbImg('building:yarnMill'),
-    luxury: thumbImg('building:workshop'),
+    steel: thumbImg('item:steel'),
+    bluePack: thumbImg('item:bluePack'),
+    robot: thumbImg('robot'),
+    lift: thumbImg('lift'),
+    fastLift: thumbImg('lift'),
+    storage: thumbImg('building:warehouse'),
     maneki: ICON.maneki,
     speed1: ICON.speed,
     speed2: ICON.speed,
@@ -48,6 +60,19 @@ export function createResearchPanel(o: { buy(id: Id): void; audio: GameAudio }) 
     tower: thumbImg('building:tower'),
     tier2: ICON.hammer,
     tier3: ICON.hammer,
+    def1: thumbImg('building:turret'),
+    def2: thumbImg('building:cannon'),
+    fireInf: thumbImg('building:cannon'),
+    sturdy1: ICON.shield,
+    sturdy2: ICON.shield,
+    sturdy3: ICON.shield,
+    sturdyInf: ICON.shield,
+    selfRepair: ICON.heart,
+    cheapRepair: ICON.hammer,
+    comfort1: thumbImg('building:bed'),
+    comfort2: thumbImg('building:bed'),
+    comfort3: thumbImg('building:bed'),
+    collarInf: ICON.heart,
   };
 
   const wrap = document.createElement('div');
@@ -55,7 +80,7 @@ export function createResearchPanel(o: { buy(id: Id): void; audio: GameAudio }) 
   wrap.hidden = true;
   wrap.innerHTML = `<section id="research" class="panel">
       <header><h2>${ICON.flask}研究</h2><div class="pill rp"><i>${ICON.rp}</i><b></b><small>RP</small></div><button class="x" title="閉じる">${ICON.close}</button></header>
-      <p class="lead">研究所に品物を届けると RP がたまる。RP を使って工場を強くしよう。</p>
+      <p class="lead">組立機で作った研究パックを研究所に届けると RP がたまる（赤 10・緑 40・青 150）。RP を使って工場を強くしよう。</p>
       <div class="tree"><svg class="lines"></svg></div>
     </section>`;
   document.body.appendChild(wrap);
@@ -66,7 +91,7 @@ export function createResearchPanel(o: { buy(id: Id): void; audio: GameAudio }) 
   wrap.querySelector<HTMLButtonElement>('.x')!.onclick = () => close();
   wrap.addEventListener('pointerdown', (e) => e.target === wrap && close());
 
-  const cards = new Map<Id, { el: HTMLElement; btn: HTMLButtonElement; reason: HTMLElement; cost: HTMLElement; lv: HTMLElement | null }>();
+  const cards = new Map<Id, { el: HTMLElement; btn: HTMLButtonElement; reason: HTMLElement; cost: HTMLElement; lv: HTMLElement | null; desc: HTMLElement }>();
   ROWS.forEach((row, r) => {
     const label = document.createElement('div');
     label.className = 'label';
@@ -86,7 +111,7 @@ export function createResearchPanel(o: { buy(id: Id): void; audio: GameAudio }) 
       const btn = el.querySelector<HTMLButtonElement>('.buy')!;
       btn.onclick = () => o.buy(id);
       tree.appendChild(el);
-      cards.set(id, { el, btn, reason: el.querySelector('em')!, cost: btn.querySelector('span')!, lv: el.querySelector('.lv') });
+      cards.set(id, { el, btn, reason: el.querySelector('em')!, cost: btn.querySelector('span')!, lv: el.querySelector('.lv'), desc: el.querySelector('.txt small')! });
     });
   });
 
@@ -107,7 +132,15 @@ export function createResearchPanel(o: { buy(id: Id): void; audio: GameAudio }) 
       const y2 = b.offsetTop + b.offsetHeight / 2;
       const mx = (x1 + x2) / 2;
       const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      p.setAttribute('d', `M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}`);
+      // 次の行の左端へ折り返す系列は、下の辺から上の辺へつなぐ
+      if (x2 < x1) {
+        const ax = a.offsetLeft + a.offsetWidth / 2;
+        const ay = a.offsetTop + a.offsetHeight;
+        const bx = b.offsetLeft + b.offsetWidth / 2;
+        const by = b.offsetTop;
+        const my = (ay + by) / 2;
+        p.setAttribute('d', `M${ax} ${ay} C${ax} ${my + 20} ${bx} ${my - 20} ${bx} ${by}`);
+      } else p.setAttribute('d', `M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}`);
       svg.appendChild(p);
       lines.set(id, p);
     }
@@ -154,6 +187,10 @@ export function createResearchPanel(o: { buy(id: Id): void; audio: GameAudio }) 
         if (c.lv) {
           const lv = `Lv.${level(s, id as InfiniteId)}`;
           if (c.lv.textContent !== lv) c.lv.textContent = lv;
+        }
+        if (AWAY_IDS.includes(id)) {
+          const desc = `${(inf ? INFINITE[id] : RESEARCH[id]).desc}（今の発生率 ×${awayResearch(s).toFixed(2)}）`;
+          if (c.desc.textContent !== desc) c.desc.textContent = desc;
         }
         const text = done ? '' : (blocker ?? '');
         if (c.reason.textContent !== text) c.reason.textContent = text;

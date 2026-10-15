@@ -1,6 +1,7 @@
-import { initCat, initialState, offlineMultiplier, type GameState } from './state';
+import { GRID, INFINITE, RESEARCH } from './data';
+import { genOres, gridSize, initCat, initialState, maxHp, newHand, newRaidState, newRunaway, offlineMultiplier, placeHq, type Cat, type GameState } from './state';
 
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 6;
 export const KEY = 'nekoFactory';
 export const BACKUP_KEY = 'nekoFactory.bak';
 const MAX_OFFLINE_SEC = 8 * 3600;
@@ -29,6 +30,34 @@ const MIGRATIONS: Record<number, (s: GameState, now: number) => void> = {
   3(s) {
     for (const b of s.buildings) b.tier ??= 1;
   },
+  // v4→v5: 襲撃と防衛。建物は HP 満タン、中心に本部（中心の建物は最寄りの空きへ）、次の襲撃は読み込みから 8 分後、猫に勇敢
+  4(s) {
+    for (const b of s.buildings) b.hp = maxHp(s, b);
+    placeHq(s);
+    s.raid = newRaidState();
+    for (const c of s.cats) initCat(s, c);
+  },
+  // v5→v6: 素材経済。猫の名簿（名前・個性・ステータス）・研究済み・島の拡張回数・コインだけ引き継ぎ、建物と在庫は初期状態にする
+  5(s, now) {
+    const fresh = initialState((s.seed || now) >>> 0 || 1);
+    fresh.coins = Number(s.coins) || 0;
+    fresh.researched = (s.researched ?? []).filter((id) => id in RESEARCH);
+    fresh.levels = Object.fromEntries(Object.entries(s.levels ?? {}).filter(([id]) => id in INFINITE));
+    // 広がった島の外周にも鉱床を作る
+    for (let k = 0; k < (Number(s.expansions) || 0) && gridSize(fresh) < GRID.max; k++) {
+      const from = gridSize(fresh);
+      fresh.expansions++;
+      genOres(fresh, from, gridSize(fresh));
+    }
+    fresh.cats = (s.cats ?? []).map((c) => {
+      const cat: Partial<Cat> = { id: c.id, name: c.name, color: c.color, stats: c.stats, good: c.good, bad: c.bad, temper: c.temper, stamina: c.stamina, lane: c.lane, x: 0, y: 0, state: 'idle', path: [], item: null, amount: 0, src: 0, dst: 0 };
+      initCat(fresh, cat);
+      return cat as Cat;
+    });
+    fresh.nextId = Math.max(fresh.nextId, Number(s.nextId) || 0, ...fresh.cats.map((c) => c.id + 1));
+    for (const k of Object.keys(s)) delete (s as unknown as Record<string, unknown>)[k];
+    Object.assign(s, fresh);
+  },
 };
 
 export function serialize(s: GameState, now: number): string {
@@ -36,7 +65,7 @@ export function serialize(s: GameState, now: number): string {
 }
 
 /** 保存データを今の版の state にする。解析できない・未知の版なら null */
-export function parseSave(json: string | null, now: number): { state: GameState; savedAt: number } | null {
+export function parseSave(json: string | null, now: number): { state: GameState; savedAt: number; from: number } | null {
   if (!json) return null;
   try {
     const d = JSON.parse(json);
@@ -45,7 +74,14 @@ export function parseSave(json: string | null, now: number): { state: GameState;
       if (!MIGRATIONS[v]) return null;
       MIGRATIONS[v](d.state, now);
     }
-    return { state: d.state, savedAt: Number(d.savedAt) || now };
+    // 確保数は後から足した（版は上げない。ない品は既定値）
+    d.state.keep ??= {};
+    // 家出も後から足した（家出中の猫と引き止めの残りは猫に、間隔と去った猫は runaway に入る。ない保存は今から 10 分は起きない）
+    d.state.runaway ??= newRunaway(Number(d.state.seed) || now);
+    // 本部の手作業も後から足した
+    d.state.hand ??= newHand();
+    d.state.craftTip ??= false;
+    return { state: d.state, savedAt: Number(d.savedAt) || now, from: d.version };
   } catch {
     return null;
   }
@@ -62,12 +98,15 @@ export function deserialize(json: string | null, now: number, backup: string | n
     saved = parseSave(backup, now);
     source = 'backup';
   }
-  if (!saved) return { state: initialState(now >>> 0 || 1), offline: 0, source: 'new' as const, savedAt: 0 };
+  if (!saved) return { state: initialState(now >>> 0 || 1), offline: 0, source: 'new' as const, savedAt: 0, migrated: false };
   const { state, savedAt } = saved;
+  /** 素材経済より前の保存から移した（説明のモーダルを出す） */
+  const migrated = saved.from < 6;
   const elapsed = Math.min(Math.max((now - savedAt) / 1000, 0), MAX_OFFLINE_SEC);
-  const offline = Math.floor(elapsed * state.incomeRate * 0.5 * offlineMultiplier(state));
+  // 古い保存には襲撃の損失で負になった速さが残っていることがあるので、負なら付与しない
+  const offline = Math.max(0, Math.floor(elapsed * state.incomeRate * 0.5 * offlineMultiplier(state)));
   state.coins += offline;
-  return { state, offline, source, savedAt };
+  return { state, offline, source, savedAt, migrated };
 }
 
 /** 本体が壊れていたときは、それでバックアップを上書きしない */

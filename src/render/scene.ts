@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { shared } from './materials';
 import type { Post } from './post';
 import { createWorld } from './world';
+import { RING } from '../sim/data';
 
 export interface Tile {
   x: number;
@@ -210,6 +211,16 @@ export function createScene(container: HTMLElement) {
   let onClick: (clientX: number, clientY: number, touch: boolean) => void = () => {};
   let onCancel: () => void = () => {};
   let onLongPress: (clientX: number, clientY: number) => void = () => {};
+  /** ドラッグで塗る（リフトの連続配置）。'start' で true を返したらその操作はパンでなく塗りになる */
+  let paint: ((clientX: number, clientY: number, phase: 'start' | 'move' | 'end') => boolean) | null = null;
+  /** 塗っている指（マウスは -1）と最後の位置 */
+  let painting: { id: number; x: number; y: number } | null = null;
+  function endPaint() {
+    if (!painting) return;
+    const p = painting;
+    painting = null;
+    paint?.(p.x, p.y, 'end');
+  }
   /** 左ボタンか 1 本指のドラッグ。held = 長押しが発火した（離してもタップにしない） */
   let drag: { x: number; y: number; moved: boolean; grab: THREE.Vector3 | null; t: number; touch: boolean; held: boolean; timer: number } | null = null;
   let spin: { x: number; yaw: number; moved: boolean } | null = null;
@@ -244,8 +255,15 @@ export function createScene(container: HTMLElement) {
   el.addEventListener('pointerdown', (e) => {
     if (e.pointerType !== 'mouse') {
       touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (touches.size === 1) return startDrag(e.clientX, e.clientY, true);
-      // 2 本目の指: タップとパンをやめてピンチへ
+      if (touches.size === 1) {
+        if (paint?.(e.clientX, e.clientY, 'start')) {
+          painting = { id: e.pointerId, x: e.clientX, y: e.clientY };
+          return;
+        }
+        return startDrag(e.clientX, e.clientY, true);
+      }
+      // 2 本目の指: タップとパンと塗りをやめてピンチへ
+      endPaint();
       endDrag();
       if (touches.size === 2) {
         const g = twoFingers();
@@ -254,8 +272,10 @@ export function createScene(container: HTMLElement) {
       }
       return;
     }
-    if (e.button === 0) startDrag(e.clientX, e.clientY, false);
-    else if (e.button === 2) spin = { x: e.clientX, yaw: rig.goalYaw, moved: false };
+    if (e.button === 0) {
+      if (paint?.(e.clientX, e.clientY, 'start')) painting = { id: -1, x: e.clientX, y: e.clientY };
+      else startDrag(e.clientX, e.clientY, false);
+    } else if (e.button === 2) spin = { x: e.clientX, yaw: rig.goalYaw, moved: false };
   });
   el.addEventListener('pointerdown', (e) => el.setPointerCapture(e.pointerId));
   el.addEventListener('pointermove', (e) => {
@@ -276,6 +296,12 @@ export function createScene(container: HTMLElement) {
         }
         return;
       }
+    }
+    if (painting && painting.id === (e.pointerType === 'mouse' ? -1 : e.pointerId)) {
+      painting.x = e.clientX;
+      painting.y = e.clientY;
+      paint?.(e.clientX, e.clientY, 'move');
+      return;
     }
     if (spin) {
       const dx = e.clientX - spin.x;
@@ -302,6 +328,13 @@ export function createScene(container: HTMLElement) {
   });
   el.addEventListener('pointerleave', (e) => e.pointerType === 'mouse' && (mouse.inside = false));
   function release(e: PointerEvent, cancel: boolean) {
+    if (painting && (e.pointerType === 'mouse' ? painting.id === -1 && (cancel || e.button === 0) : painting.id === e.pointerId)) {
+      painting.x = e.clientX;
+      painting.y = e.clientY;
+      endPaint();
+      if (e.pointerType !== 'mouse') touches.delete(e.pointerId);
+      return;
+    }
     if (e.pointerType !== 'mouse') {
       if (!touches.delete(e.pointerId)) return;
       if (pinch) {
@@ -348,7 +381,8 @@ export function createScene(container: HTMLElement) {
   window.addEventListener('blur', () => keys.clear());
 
   function clampTarget() {
-    const h = size / 2;
+    // 追跡中は浜と沖まで（家出していかだで出ていく猫を追える）
+    const h = size / 2 + (follow ? RING + 6 : 0);
     rig.target.x = THREE.MathUtils.clamp(rig.target.x, -h, h);
     rig.target.z = THREE.MathUtils.clamp(rig.target.z, -h, h);
   }
@@ -463,6 +497,14 @@ export function createScene(container: HTMLElement) {
     },
     set onCancel(fn: () => void) {
       onCancel = fn;
+    },
+    /** ドラッグ塗り。'start'（左ボタンか 1 本指の押下）で true を返すと、離すまで 'move' と 'end' を呼ぶ（パン・クリック・長押しはしない） */
+    set paint(fn: ((clientX: number, clientY: number, phase: 'start' | 'move' | 'end') => boolean) | null) {
+      paint = fn;
+      if (!fn) painting = null;
+    },
+    get paint() {
+      return paint;
     },
     /** タッチの長押し（500ms） */
     set onLongPress(fn: (clientX: number, clientY: number) => void) {

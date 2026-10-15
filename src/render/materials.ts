@@ -92,6 +92,8 @@ export interface MatOpts {
   fx?: boolean;
   /** glow 頂点属性（窓・液体など、稼働中に光る） */
   glow?: boolean;
+  /** aDmg インスタンス属性: x 傷み（ひびの量）, y 故障（黒ずみ） */
+  dmg?: boolean;
   /** 風で揺れる強さ */
   wind?: number;
   /** ベルトコンベアの縞（ワールド z 方向に流れる） */
@@ -113,6 +115,10 @@ varying vec4 vFx;
 #ifdef NK_GLOW
 attribute float glow;
 varying float vGlow;
+#endif
+#ifdef NK_DMG
+attribute vec2 aDmg;
+varying vec2 vDmg;
 #endif
 #ifdef NK_FUR
 attribute vec3 aFur;
@@ -143,6 +149,9 @@ vFx = aFx;
 #endif
 #ifdef NK_GLOW
 vGlow = glow;
+#endif
+#ifdef NK_DMG
+vDmg = aDmg;
 #endif
 #ifdef NK_WIND
 {
@@ -180,6 +189,16 @@ varying vec4 vFx;
 #endif
 #ifdef NK_GLOW
 varying float vGlow;
+#endif
+#ifdef NK_DMG
+varying vec2 vDmg;
+float nkH2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float nkN2(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(nkH2(i), nkH2(i + vec2(1, 0)), f.x), mix(nkH2(i + vec2(0, 1)), nkH2(i + vec2(1, 1)), f.x), f.y);
+}
 #endif
 #ifdef NK_FUR
 uniform vec3 uCalicoA;
@@ -246,6 +265,16 @@ diffuseColor.rgb *= mix(0.45, 1.0, step(0.5, fract(vNkWorld.z * 14.0 - vFx.w)));
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.18, 0.12), vFx.z * 0.5);
 }
 #endif
+#ifdef NK_DMG
+if (vDmg.x > 0.01) {
+  // ひび: ワールド座標のノイズの等高線を、傷むほど太く濃く
+  vec3 w = vNkWorld * 6.0;
+  float n = nkN2(w.xy + w.zz * 0.7) * 0.6 + nkN2(w.zy * 1.7 + 3.1) * 0.4;
+  float crack = 1.0 - smoothstep(0.0, 0.012 + 0.03 * vDmg.x, abs(n - 0.5));
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.14, 0.1, 0.08), crack * smoothstep(0.05, 0.5, vDmg.x) * 0.9);
+}
+diffuseColor.rgb *= 1.0 - 0.5 * vDmg.y;
+#endif
 `;
 
 const FRAG_EMISSIVE = /* glsl */ `
@@ -299,6 +328,7 @@ export function toon(o: MatOpts = {}) {
   const defs = [
     o.fx && '#define NK_FX',
     o.glow && '#define NK_GLOW',
+    o.dmg && '#define NK_DMG',
     o.wind && `#define NK_WIND ${o.wind.toFixed(4)}`,
     o.belt && '#define NK_BELT',
     o.fur !== undefined && `#define NK_FUR ${o.fur}\n#define NK_EYE_Y ${EYE_Y.toFixed(4)}`,
@@ -325,7 +355,7 @@ export function toon(o: MatOpts = {}) {
 /** 頂点カラーを使う建物・小物の共通マテリアル */
 export const MAT = {
   solid: toon({ vertexColors: true }),
-  fx: toon({ vertexColors: true, fx: true, glow: true }),
+  fx: toon({ vertexColors: true, fx: true, glow: true, dmg: true }),
   belt: toon({ vertexColors: true, fx: true, belt: true }),
   glass: toon({ vertexColors: true, transparent: true, opacity: 0.5, depthWrite: false, rim: 1.4 }),
 };

@@ -41,6 +41,10 @@ export function bfs(size: number, blocked: Uint8Array, sx: number, sy: number) {
     if (i >= size) visit(i - size, i);
   }
   return {
+    /** 訪れたタイル番号（BFS の順、建物のタイルも含む） */
+    order: () => queue.subarray(0, tail),
+    /** タイル番号 → 座標 */
+    cell,
     /** 到達不能なら -1 */
     dist: (x: number, y: number) => dist[idx(x, y)],
     /** 出発タイルを除いた経路。到達不能なら null */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { STAT_GROWTH } from './data';
-import { assignCat, buyResearch, catSpeed, expandCost, expandIsland, facilityUsers, gridSize, hireCat, infiniteCost, initialState, placeBuilding, removeBuilding, tradeMultiplier, upgradeBuilding, type Cat, type GameState } from './state';
+import { ITEM_IDS, STAT_GROWTH } from './data';
+import { assignCat, buyResearch, catSpeed, expandCost, expandIsland, facilityUsers, gridSize, hireCat, infiniteCost, initialState, placeBuilding, removeBuilding, renameCat, tradeMultiplier, upgradeBuilding, type Cat, type GameState } from './state';
 import { dump, factory, hash } from './fixture';
 import { simOptions, tick } from './tick';
 
@@ -8,8 +8,17 @@ const DT = 0.1;
 function run(s: GameState, seconds: number) {
   for (let i = 0; i < Math.round(seconds / DT); i++) tick(s, DT);
 }
+/** 本部のない島（襲撃と関係のないルールの確認用）。猫 1 匹、資材はたっぷり */
+function bare(seed?: number) {
+  const s = initialState(seed);
+  s.buildings = [];
+  s.cats.length = 1;
+  for (const id of ITEM_IDS) s.store[id] = 1e6;
+  s.layoutVersion++;
+  return s;
+}
 function rich() {
-  const s = initialState();
+  const s = bare();
   s.coins = 1e6;
   s.cats = []; // 猫に運ばせない
   return s;
@@ -29,17 +38,6 @@ describe('sim', () => {
     expect(b.running).toBe(false);
   });
 
-  it('猫が魚を市場に届けるとコインが価値分増える', () => {
-    const s = initialState();
-    expect(placeBuilding(s, 'fishing', 1, 0)).toBeNull();
-    expect(placeBuilding(s, 'market', 3, 0)).toBeNull();
-    const start = s.coins;
-    const events = [];
-    for (let i = 0; i < 100 && s.coins === start; i++) events.push(...tick(s, DT));
-    expect(s.coins - start).toBe(5);
-    expect(events).toEqual([{ kind: 'coin', amount: 5, x: 3, y: 0 }]);
-  });
-
   it('加工場が魚 2 → 猫缶 1 を生産する', () => {
     const s = rich();
     placeBuilding(s, 'cannery', 0, 0);
@@ -55,75 +53,49 @@ describe('sim', () => {
     expect(b.input.fish).toBe(1);
   });
 
-  it('研究所がアイテムを受け取って 1 秒後に RP が増え、入力 10 個で満杯になり受け付けなくなる', () => {
-    const s = initialState();
-    s.coins = 1e6;
-    placeBuilding(s, 'fishing', 1, 0);
-    placeBuilding(s, 'lab', 3, 0);
-    const [fishing, lab] = s.buildings;
-    fishing.output = 1;
-    // 猫が魚を研究所の入力へ届けるまで進める（市場はない）
-    for (let i = 0; i < 100 && !lab.input.fish; i++) tick(s, DT);
-    expect(lab.input.fish).toBe(1);
-    run(s, 0.9);
-    expect(s.rp).toBe(0);
-    const events = tick(s, DT);
-    expect(s.rp).toBe(1); // 魚の価値 5 ÷ 5
-    expect(events).toContainEqual({ kind: 'rp', amount: 1, x: 3, y: 0 });
-    expect(lab.input.fish).toBe(0);
-
-    // 入力が 10 個なら受け付けず、市場があればそちらへ運ぶ（進行中の仕事は取り消してから確認）
-    Object.assign(s.cats[0], { state: 'idle', path: [], item: null, amount: 0 });
-    lab.input.fish = 10;
-    fishing.output = 5;
-    tick(s, DT);
-    expect(s.cats[0].state).toBe('idle');
-    expect(fishing.output).toBe(5);
-    placeBuilding(s, 'market', -2, 0);
-    tick(s, DT);
-    expect(s.cats[0].state).toBe('toSource');
-    expect(s.cats[0].dst).toBe(s.buildings[2].id);
-  });
-
   it('研究購入で RP が減り、前提未達や RP 不足では失敗する', () => {
-    const s = initialState();
+    const s = bare();
     s.rp = 200;
-    expect(buyResearch(s, 'yarn')).toBe('前提: 包装');
-    expect(buyResearch(s, 'pack')).toBeNull();
-    expect(s.rp).toBe(50);
-    expect(s.researched).toEqual(['pack']);
-    expect(buyResearch(s, 'pack')).toBe('研究済み');
-    expect(buyResearch(s, 'yarn')).toBe('RP 不足');
-    expect(s.rp).toBe(50);
-    expect(s.researched).toEqual(['pack']);
+    expect(buyResearch(s, 'lift')).toBe('前提: 製鋼');
+    expect(buyResearch(s, 'steel')).toBeNull();
+    expect(s.rp).toBe(100);
+    expect(s.researched).toEqual(['steel']);
+    expect(buyResearch(s, 'steel')).toBe('研究済み');
+    expect(buyResearch(s, 'lift')).toBe('RP 不足');
+    expect(s.rp).toBe(100);
+    expect(s.researched).toEqual(['steel']);
   });
 
   it('島を広げるとコインが減り、敷地が 1 周（+4）広がる', () => {
-    const s = initialState();
+    const s = bare();
     s.coins = 2000;
-    expect(gridSize(s)).toBe(20);
+    expect(gridSize(s)).toBe(28);
     expect(expandCost(s)).toBe(500);
-    expect(placeBuilding(s, 'fishing', -12, 0)).toBe('敷地の外です');
+    expect(placeBuilding(s, 'fishing', -16, 0)).toBe('敷地の外です');
+    const ores = s.ores.length;
     expect(expandIsland(s)).toBeNull();
     expect(s.coins).toBe(1500);
-    expect(gridSize(s)).toBe(24);
+    expect(gridSize(s)).toBe(32);
+    // 広がった外周にも鉱床ができる
+    expect(s.ores.length).toBeGreaterThan(ores);
+    expect(s.ores.slice(ores).every((o) => Math.max(Math.abs(o.x + 0.5), Math.abs(o.y + 0.5)) > 14)).toBe(true);
     expect(expandCost(s)).toBe(1000);
     expect(expandIsland(s)).toBeNull();
-    expect(gridSize(s)).toBe(28);
+    expect(gridSize(s)).toBe(36);
     expect(s.coins).toBe(500);
     expect(expandIsland(s)).toBe('コインが足りません');
-    expect(placeBuilding(s, 'fishing', -12, 0)).toBeNull(); // 広がった外周に建てられる
-    s.expansions = 10;
+    expect(placeBuilding(s, 'fishing', -16, 0)).toBeNull(); // 広がった外周に建てられる
+    s.expansions = 8;
     s.coins = 1e9;
     expect(gridSize(s)).toBe(60);
     expect(expandIsland(s)).toBe('これ以上は広げられません');
   });
 
   it('無限研究はレベルごとにコストが上がり、効果が積み重なる', () => {
-    const s = initialState();
+    const s = bare();
     s.rp = 100000;
     expect(buyResearch(s, 'speedInf')).toBe('前提: 速足 III');
-    s.researched.push('speed1', 'speed2', 'speed3', 'pack');
+    s.researched.push('speed1', 'speed2', 'speed3', 'storage');
     const base = catSpeed(s);
     expect(infiniteCost(s, 'speedInf')).toBe(1000);
     expect(buyResearch(s, 'speedInf')).toBeNull();
@@ -133,22 +105,22 @@ describe('sim', () => {
     expect(s.rp).toBe(100000 - 1000 - 1600);
     expect(catSpeed(s)).toBeCloseTo(base + 2 * 0.05 * 2);
 
-    // 交渉∞ ×2 で市場の売値が 1.1 倍
+    // 交渉∞ ×2 で市場の売値が 1.1 倍（歯車 14 → 15.4）
     expect(buyResearch(s, 'tradeInf')).toBeNull();
     expect(buyResearch(s, 'tradeInf')).toBeNull();
     expect(tradeMultiplier(s)).toBeCloseTo(1.1);
     placeBuilding(s, 'market', 1, 0);
-    const cat = s.cats[0];
-    Object.assign(cat, { x: 1, y: 0, state: 'toDest', item: 'luxury', amount: 1, dst: s.buildings[0].id, path: [] });
+    s.sell = { gear: 0 };
     const before = s.coins;
-    tick(s, DT);
-    expect(s.coins - before).toBe(440);
+    run(s, 1);
+    expect(s.coins - before).toBeCloseTo(15.4);
   });
 
   it('元気が 0 近くの猫は眠り、眠り終わると元気が 1 に戻る', () => {
-    const s = initialState(7);
+    const s = bare(7);
     const cat = s.cats[0];
     cat.energy = 0.02;
+    cat.temper = 'normal';
     let i = 0;
     while (cat.rest !== 'sleep' && i++ < 600) tick(s, DT);
     expect(cat.rest).toBe('sleep');
@@ -165,10 +137,10 @@ describe('sim', () => {
   });
 
   it('同じ建物から同時に出発した 2 匹は 0.35 タイル以上離れる', () => {
-    const s = initialState(3);
+    const s = bare(3);
     s.coins = 1e6;
     placeBuilding(s, 'fishing', 0, 0);
-    placeBuilding(s, 'market', 6, 0);
+    placeBuilding(s, 'cannery', 6, 0);
     const [src, dst] = s.buildings;
     hireCat(s);
     for (const c of s.cats) Object.assign(c, { x: 0.62, y: 0, nx: 1, ny: 0, state: 'toSource', item: 'fish', amount: 1, src: src.id, dst: dst.id, path: [] });
@@ -180,12 +152,13 @@ describe('sim', () => {
   });
 
   it('疲れた猫は 10 タイル以内のベッドへ歩いて行き、休むと元気が 1 に戻ってベッドが空く', () => {
-    const s = initialState(5);
+    const s = bare(5);
     s.coins = 1e6;
     placeBuilding(s, 'bed', 4, 0);
     const bed = s.buildings[0];
     const cat = s.cats[0];
     cat.energy = 0.02;
+    cat.temper = 'normal';
     let i = 0;
     while (cat.restAt !== bed.id && i++ < 600) tick(s, DT);
     expect(cat.rest).toBe('sleep');
@@ -200,7 +173,7 @@ describe('sim', () => {
   });
 
   it('向かい合って歩く 2 匹は擦れ違いの間ずっと 0.3 タイル以上離れている', () => {
-    const s = initialState(9);
+    const s = bare(9);
     s.coins = 1e6;
     hireCat(s);
     const [a, b] = s.cats;
@@ -219,15 +192,14 @@ describe('sim', () => {
   });
 
   it('高速化の前後で結果が変わらない（猫 50・建物 150・36×36 を 600 tick）', () => {
-    // 高速化前のコードで取ったダンプのハッシュ。再探索の 0.5 秒待ちと、
-    // 出荷元 BFS の逆順の経路（距離は同じで同じ長さの経路の選び方だけが違う）は結果を変えるので切って比べる。
-    // 猫の個性（脚力による速度・気質による疲れ方）で値が変わる。ステータス 0・気質ふつう・成長なしなら旧値 e7254fa5 / rp 471 と一致する
+    // 需要優先の割当（haul.ts）にしたときのダンプのハッシュ（意図しない挙動の変化の検出用）。
+    // 出荷元 BFS の逆順の経路（距離は同じで同じ長さの経路の選び方だけが違う）は結果を変えるので切って比べる
     const saved = { ...simOptions };
     Object.assign(simOptions, { retry: 0, reversePath: false });
     try {
       const s = factory(50, 150, 36);
       run(s, 60);
-      expect({ coins: s.coins, rp: s.rp, hash: hash(dump(s)) }).toEqual({ coins: 0, rp: 466, hash: '3c579ce2' });
+      expect({ coins: s.coins, rp: s.rp, hash: hash(dump(s)) }).toEqual({ coins: 6376, rp: 790, hash: '7b2b025d' });
     } finally {
       Object.assign(simOptions, saved);
     }
@@ -236,7 +208,7 @@ describe('sim', () => {
   describe('猫の個性・配属・成長', () => {
     /** 個性を固定した猫（得意: 研究、苦手: 力持ち、ステータスはすべて 0） */
     const plain = (c: Cat, stats: Partial<Cat['stats']> = {}) =>
-      Object.assign(c, { good: 'study', bad: 'str', temper: 'normal', stats: { leg: 0, str: 0, fish: 0, cook: 0, craft: 0, study: 0, ...stats } });
+      Object.assign(c, { good: 'study', bad: 'str', temper: 'normal', stats: { leg: 0, str: 0, fish: 0, mine: 0, cook: 0, craft: 0, study: 0, brave: 0, ...stats } });
     /** 生産を 1 回終えるまでの秒数 */
     function cycle(s: GameState, i = 0) {
       const b = s.buildings[i];
@@ -255,9 +227,9 @@ describe('sim', () => {
     }
 
     it('運搬中に脚力が伸び、得意なら 2 倍、苦手なら半分、100 で止まる', () => {
-      const s = initialState();
+      const s = bare();
       s.coins = 1e6;
-      placeBuilding(s, 'market', 9, 0);
+      placeBuilding(s, 'cannery', 9, 0);
       const cat = plain(s.cats[0], { leg: 10 });
       const carry = () => Object.assign(cat, { x: -9, y: 0, nx: -9, ny: 0, state: 'toDest', item: 'fish', amount: 1, dst: s.buildings[0].id, path: Array.from({ length: 18 }, (_, k) => ({ x: -8 + k, y: 0 })) });
       carry();
@@ -303,8 +275,8 @@ describe('sim', () => {
       cat.good = 'fish';
       cat.stats.fish = 50;
       expect(cycle(s)).toBeCloseTo(2 / (1.5 * 1.25), 1);
-      // 職人は運搬ジョブを取らない（市場があっても作業位置に留まる）
-      placeBuilding(s, 'market', 4, 0);
+      // 職人は運搬ジョブを取らない（届け先があっても作業位置に留まる）
+      placeBuilding(s, 'cannery', 4, 0);
       b.output = 5;
       run(s, 2);
       expect(cat.state).toBe('idle');
@@ -313,11 +285,12 @@ describe('sim', () => {
 
     it('力持ち 50 で運搬量 +1、100 で +2', () => {
       const amountWith = (str: number) => {
-        const s = initialState();
+        const s = bare();
         s.coins = 1e6;
         placeBuilding(s, 'fishing', 1, 0);
-        placeBuilding(s, 'market', 3, 0);
+        placeBuilding(s, 'cannery', 3, 0);
         s.buildings[0].output = 5;
+        s.buildings[0].out = 'fish';
         plain(s.cats[0], { str });
         tick(s, DT);
         return s.cats[0].amount;
@@ -329,16 +302,16 @@ describe('sim', () => {
     });
 
     it('配属先を撤去すると運び屋に戻る', () => {
-      const s = initialState();
+      const s = bare();
       s.coins = 1e6;
       placeBuilding(s, 'fishing', 0, 2);
       placeBuilding(s, 'fishing', 1, 0);
-      placeBuilding(s, 'market', 3, 0);
+      placeBuilding(s, 'cannery', 3, 0);
       const [work, src] = s.buildings;
       const cat = s.cats[0];
       expect(assignCat(s, cat.id, work.id)).toBeNull();
       untilWorking(s, [cat]);
-      src.output = 3;
+      Object.assign(src, { output: 3, out: 'fish' });
       run(s, 1);
       expect(cat.state).toBe('idle'); // 職人なので運ばない
       expect(removeBuilding(s, work.x, work.y)).toBeNull();
@@ -351,14 +324,14 @@ describe('sim', () => {
   });
 
   describe('建物のティア', () => {
-    it('強化でコインが減りティアが上がり、生産時間が 1/1.5 になる', () => {
+    it('強化で資材が減りティアが上がり、生産時間が 1/1.5 になる', () => {
       const s = rich();
-      s.researched.push('pack', 'tier2', 'tier3');
+      s.researched.push('steel', 'tier2', 'tier3');
       placeBuilding(s, 'fishing', 0, 0);
       const b = s.buildings[0];
-      const coins = s.coins;
+      const bricks = s.store.brick!;
       expect(upgradeBuilding(s, b.id)).toBeNull();
-      expect(s.coins).toBe(coins - 50 * 4);
+      expect(s.store.brick).toBe(bricks - 5 * 4);
       expect(b.tier).toBe(2);
       run(s, 2 / 1.5 - 0.05);
       expect(b.output).toBe(0);
@@ -367,43 +340,43 @@ describe('sim', () => {
       // ティア 2 の出力上限は 15
       run(s, 60);
       expect(b.output).toBe(15);
-      // 強化コストは設置数によらない
+      // 強化の資材は設置数によらない
       placeBuilding(s, 'fishing', 2, 0);
       expect(upgradeBuilding(s, b.id)).toBeNull();
-      expect(s.coins).toBe(coins - 50 * 4 - Math.floor(50 * 1.15) - 50 * 12);
+      expect(s.store.brick).toBe(bricks - 5 * 4 - 5 - 5 * 12);
       expect(b.tier).toBe(3);
       expect(upgradeBuilding(s, b.id)).toBe('最大ティアです');
-      // 撤去の返金は強化分も含めて 50%
-      const before = s.coins;
+      // 撤去は建設と強化の資材の 50% が戻る
+      s.store.brick = 0;
       removeBuilding(s, 0, 0);
-      expect(s.coins - before).toBe(Math.floor((Math.floor(50 * 1.15) + 50 * 16) * 0.5));
+      expect(s.store.brick).toBe(Math.floor(5 * 17 * 0.5));
     });
 
     it('研究が未達なら強化できない', () => {
       const s = rich();
       placeBuilding(s, 'market', 0, 0);
       const b = s.buildings[0];
-      const coins = s.coins;
+      const bricks = s.store.brick!;
       expect(upgradeBuilding(s, b.id)).toBe('研究「増築」が必要です');
-      s.researched.push('pack', 'tier2');
+      s.researched.push('steel', 'tier2');
       expect(upgradeBuilding(s, b.id)).toBeNull();
       expect(upgradeBuilding(s, b.id)).toBe('研究「大改装」が必要です');
       expect(b.tier).toBe(2);
-      expect(s.coins).toBe(coins - 100 * 4);
+      expect(s.store.brick).toBe(bricks - 10 * 4);
       s.researched.push('tier3');
-      s.coins = 100 * 12 - 1;
-      expect(upgradeBuilding(s, b.id)).toBe('コインが足りません');
+      s.store.brick = 10 * 12 - 1;
+      expect(upgradeBuilding(s, b.id)).toBe('資材が足りません（石レンガ 1）');
       expect(b.tier).toBe(2);
     });
 
     it('ティア 3 で職人 2 匹を配属でき、ボーナスが乗算になる', () => {
       const s = rich();
-      s.researched.push('pack', 'tier2', 'tier3');
+      s.researched.push('steel', 'tier2', 'tier3');
       for (let i = 0; i < 3; i++) hireCat(s);
       placeBuilding(s, 'fishing', 0, 0);
       const b = s.buildings[0];
       const [a, c, d] = s.cats;
-      for (const [k, cat] of s.cats.entries()) Object.assign(cat, { x: -3 + k, y: 3, nx: -3 + k, ny: 3, good: k === 1 ? 'fish' : 'study', bad: 'str', temper: 'normal', stats: { leg: 0, str: 0, fish: k === 1 ? 20 : 40, cook: 0, craft: 0, study: 0 } });
+      for (const [k, cat] of s.cats.entries()) Object.assign(cat, { x: -3 + k, y: 3, nx: -3 + k, ny: 3, good: k === 1 ? 'fish' : 'study', bad: 'str', temper: 'normal', stats: { leg: 0, str: 0, fish: k === 1 ? 20 : 40, mine: 0, cook: 0, craft: 0, study: 0, brave: 0 } });
       expect(assignCat(s, a.id, b.id)).toBeNull();
       expect(assignCat(s, c.id, b.id)).toBe('職人がいっぱいです');
       upgradeBuilding(s, b.id);
@@ -424,5 +397,15 @@ describe('sim', () => {
       }
       expect(t).toBeCloseTo(2 / (2.25 * 1.4 * 1.2 * 1.25), 1);
     });
+  });
+  it('猫の改名は前後の空白を除いて 1〜8 文字', () => {
+    const s = bare();
+    const c = s.cats[0];
+    expect(renameCat(s, c.id, '  にゃんこ ')).toBeNull();
+    expect(c.name).toBe('にゃんこ');
+    expect(renameCat(s, c.id, 'あいうえおかきく')).toBeNull();
+    expect(renameCat(s, c.id, 'あいうえおかきくけ')).toBe('名前は 1〜8 文字にしてください');
+    expect(renameCat(s, c.id, '   ')).toBe('名前は 1〜8 文字にしてください');
+    expect(c.name).toBe('あいうえおかきく');
   });
 });

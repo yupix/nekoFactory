@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { ItemId } from '../sim/data';
+import { ITEM_IDS, type ItemId } from '../sim/data';
 import { toon } from './materials';
 import { itemModels } from './models';
 
@@ -101,7 +101,7 @@ export class Layer {
   }
 }
 
-export const ITEM_IDS: ItemId[] = ['fish', 'can', 'yarn', 'gift', 'scarf', 'luxury'];
+export { ITEM_IDS };
 
 /** アイテムの小さなモデル。在庫の山・猫の荷物・飛んでいく品を毎フレームまとめて描く */
 export function createItems(parent: THREE.Object3D) {
