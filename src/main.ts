@@ -427,8 +427,9 @@ view.onClick = (x, y, touch) => {
     const catId = ents.pickCat(ray);
     const cat = catId === null ? null : state.cats.find((c) => c.id === catId);
     if (cat) {
+      // 寝ている猫は起こすだけ（情報カードは出さない。スマホでは画面を覆って邪魔になる）
+      if (cat.rest === 'sleep' && !isLeaving(cat)) return wake(cat);
       if (isLeaving(cat)) stay(cat);
-      else if (cat.rest === 'sleep') wake(cat);
       else audio.play('select');
       selectCat(cat);
       return;
