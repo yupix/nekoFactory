@@ -6,10 +6,13 @@ import { outputFull, simOptions, type Ctx } from './tick';
 /**
  * 運搬の割当（需要優先）。毎 tick、需要（入力が足りない建物）と供給（建物の出力・確保数を超える本部の在庫）を集め、
  * 優先度の段階で「出荷元 → 届け先」の組を作る。距離は同じ段階の中でだけ比べる:
- *   1 飢えた建物 ← 出力が満杯で止まっている出荷元 / 2 飢えた建物 ← その他の出荷元（本部を含む）/ 3 不足した建物 ← 出荷元 /
- *   4 満杯で止まっている出荷元 → 受け取れる建物（なければ本部）/ 5 その他の出荷元 → 同じ / 6 本部 → 入力に空きのある建物（補充）
+ *   1 飢えた建物 ← 出力が満杯で止まっている出荷元 / 2 飢えた建物 ← その他の出荷元（本部を含む）/
+ *   3 満杯で止まっている出荷元 → 受け取れる建物（なければ本部）/ 4 不足した建物 ← 出荷元 / 5 その他の出荷元 → 3 と同じ /
+ *   6 本部 → 入力に空きのある建物（補充）
+ * 3・5 段の届け先には、出力が満杯で止まっている建物は選ばない（本部にも届かないときの最後の手段だけ）。止まった建物の出力が別の止まった建物に詰め込まれず本部へ行くように。
+ * 止まった出荷元（3 段）は不足（4 段）より先に拾う（運搬量の 1 回分を届けるたびに不足が再発して、止まった建物がいつまでも後回しにならないように）。
  * 段階の高い組から順に、その組の出荷元に一番近い待機中の猫を割り当てる。1 つの組には 1 tick に 1 匹まで。
- * 4 段だけは、満杯で止まってから（最後に拾われてから）長い出荷元から拾う（補充の速い近くの採掘機がいつも勝って、遠くの止まった建物が拾われ続けないように）
+ * 3 段だけは、満杯で止まってから（最後に拾われてから）長い出荷元から拾う（補充の速い近くの採掘機がいつも勝って、遠くの止まった建物が拾われ続けないように）
  */
 
 export const inputTotal = (b: Building) => Object.values(b.input).reduce((a, n) => a + (n ?? 0), 0);
@@ -35,25 +38,34 @@ const levelOf = (have: number, need: number) => (have < need ? 0 : have < 2 * ne
 const available = (s: GameState, src: Building, item: ItemId) => (src.type === 'hq' ? stock(s, item) - keepOf(s, item) : src.out === item ? src.output : 0);
 /** 出力が満杯で止まっている */
 const isFull = (s: GameState, b: Building) => b.type !== 'hq' && (b.output >= bufferCap(b) || outputFull(s, b));
+/** 割当の段階（bucket の添字。小さいほど先） */
+const P = { starvedFull: 1, starved: 2, stalled: 3, short: 4, surplus: 5, refill: 6 } as const;
+/** 需要の組の段階（0 は組にしない） */
+const demandP = (s: GameState, src: Building, level: number) => (level === 0 ? (isFull(s, src) ? P.starvedFull : P.starved) : level === 1 ? P.short : src.type === 'hq' ? P.refill : 0);
 
 interface Pair {
   p: number;
   src: Building;
   item: ItemId;
-  /** 届け先（4・5 段は割り当てるときに選び直す） */
+  /** 届け先（3・5 段は割り当てるときに選び直す） */
   dst: Building;
   /** 同じ段の中で比べる距離（一番近い待機猫 → 出荷元 → 届け先） */
   dist: number;
   /** 本部から出す（同じ段では建物の出力の後） */
   late: boolean;
-  /** 4 段: 出荷元が満杯で止まった回（古いほど先） */
+  /** 3 段: 出荷元が満杯で止まった回（古いほど先） */
   since: number;
 }
 
-/** 4・5 段の届け先: 出荷元から一番近い、受け取れる建物。なければ本部 */
+/**
+ * 3・5 段の届け先: 出荷元から一番近い、受け取れる建物（出力が満杯で止まっている建物を除く）。なければ本部。
+ * 本部にも届かない・空きがなければ、一番近い止まっている建物（最後の手段。満杯の出荷元がいつまでも拾われないことはないように）
+ */
 function receiver(s: GameState, ctx: Ctx, src: Building, item: ItemId, from: Bfs) {
   let best: Building | null = null;
   let bestD = Infinity;
+  let stalled: Building | null = null;
+  let stalledD = Infinity;
   let hq: Building | null = null;
   for (const d of ctx.L.dsts[item]!) {
     if (d === src || isBroken(d)) continue;
@@ -62,9 +74,11 @@ function receiver(s: GameState, ctx: Ctx, src: Building, item: ItemId, from: Bfs
     const dd = from.dist(d.x, d.y);
     if (dd < 0) continue;
     if (d.type === 'hq') hq = d;
-    else if (dd < bestD) (best = d), (bestD = dd);
+    else if (isFull(s, d)) {
+      if (dd < stalledD) (stalled = d), (stalledD = dd);
+    } else if (dd < bestD) (best = d), (bestD = dd);
   }
-  return best ?? hq;
+  return best ?? hq ?? stalled;
 }
 
 /** 待機中の猫に運搬の仕事を割り当てる（tick の冒頭に 1 回） */
@@ -120,7 +134,7 @@ export function assignJobs(s: GameState, ctx: Ctx) {
         if (src === d || (level === 2 && src.type !== 'hq')) continue;
         const dd = ctx.fromBuilding(src).dist(d.x, d.y);
         if (dd < 0) continue;
-        const p = level === 0 ? (isFull(s, src) ? 1 : 2) : level === 1 ? 3 : 6;
+        const p = demandP(s, src, level);
         buckets[p].push({ p, src, item, dst: d, dist: catDist(src) + dd, late: src.type === 'hq' && !SUPPLY.includes(item), since: 0 });
       }
     }
@@ -130,8 +144,8 @@ export function assignJobs(s: GameState, ctx: Ctx) {
       const from = ctx.fromBuilding(src);
       const d = receiver(s, ctx, src, item, from);
       if (!d) continue;
-      const p = isFull(s, src) ? 4 : 5;
-      buckets[p].push({ p, src, item, dst: d, dist: catDist(src) + from.dist(d.x, d.y), late: false, since: p === 4 ? (L.fullSince.get(src.id) ?? L.clock) : 0 });
+      const p = isFull(s, src) ? P.stalled : P.surplus;
+      buckets[p].push({ p, src, item, dst: d, dist: catDist(src) + from.dist(d.x, d.y), late: false, since: p === P.stalled ? (L.fullSince.get(src.id) ?? L.clock) : 0 });
     }
   }
 
@@ -145,17 +159,18 @@ export function assignJobs(s: GameState, ctx: Ctx) {
       if (avail <= 0) continue;
       let dst = pair.dst;
       const from = ctx.fromBuilding(src);
-      if (p === 4 || p === 5) {
+      const supplyPair = p === P.stalled || p === P.surplus;
+      if (supplyPair) {
         const d = receiver(s, ctx, src, item, from);
         if (!d) continue;
         dst = d;
       }
       const r = room(s, ctx, dst, item);
       if (r.have >= r.cap) continue;
-      if (p <= 3 || p === 6) {
+      if (!supplyPair) {
         // 先の割当で需要が満たされてきたら、その段階の組として後ろへ回す
         const level = isFull(s, dst) ? 2 : levelOf(r.have, needOf(s, dst, item));
-        const now = level === 0 ? (isFull(s, src) ? 1 : 2) : level === 1 ? 3 : src.type === 'hq' ? 6 : 0;
+        const now = demandP(s, src, level);
         if (now !== p) {
           if (now > p) buckets[now].push({ ...pair, p: now });
           continue;

@@ -207,14 +207,14 @@ describe('sim', () => {
   });
 
   it('高速化の前後で結果が変わらない（猫 50・建物 150・36×36 を 600 tick）', () => {
-    // 基本の運搬量を 2 にしたときのダンプのハッシュ（意図しない挙動の変化の検出用）。
+    // 運搬の優先度を見直したときのダンプのハッシュ（意図しない挙動の変化の検出用）。
     // 出荷元 BFS の逆順の経路（距離は同じで同じ長さの経路の選び方だけが違う）は結果を変えるので切って比べる
     const saved = { ...simOptions };
     Object.assign(simOptions, { retry: 0, reversePath: false });
     try {
       const s = factory(50, 150, 36);
       run(s, 60);
-      expect({ coins: s.coins, rp: s.rp, hash: hash(dump(s)) }).toEqual({ coins: 6273, rp: 1050, hash: 'a612938' });
+      expect({ coins: s.coins, rp: s.rp, hash: hash(dump(s)) }).toEqual({ coins: 6573, rp: 980, hash: '313c734d' });
     } finally {
       Object.assign(simOptions, saved);
     }

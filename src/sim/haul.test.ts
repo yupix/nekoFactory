@@ -3,7 +3,9 @@ import { ITEM_IDS, ORES, RECIPES, SQUEEZE, type BuildingType, type ItemId, type 
 import { haulStatus, isFreeCarrier, needOf } from './haul';
 import { bfs, occupancy, type Bfs } from './path';
 import { accepts, bufferCap, gridSize, hireCat, initialState, keepOf, placeBuilding, rand, stock, storeCap, type Building, type Cat, type GameState } from './state';
-import { outputFull, tick } from './tick';
+import { parseSave } from './save';
+import { outputFull, simOptions, tick } from './tick';
+import stalledSave from './fixtures/user-save-stalled-hq.json?raw';
 
 const DT = 0.1;
 
@@ -193,10 +195,77 @@ describe('運搬の割当（需要優先）', () => {
         maxFull = Math.max(maxFull, fullFor);
       }
       // 2 匹・運搬量 2 でも採掘機の方が速いので満杯にはなるが、拾われずに止まり続けることはない
-      expect(delivered).toBeGreaterThanOrEqual(15);
-      expect(made).toBeGreaterThanOrEqual(15);
-      expect(maxFull).toBeLessThan(20);
+      expect(delivered).toBeGreaterThanOrEqual(25);
+      expect(made).toBeGreaterThanOrEqual(20);
+      expect(maxFull).toBeLessThan(12);
     });
+
+  it('再現: 出力が満杯で止まった建物ばかりのユーザーのセーブ（猫 3 匹）で、止まった出力が本部へ運ばれる', () => {
+    const s = parseSave(stalledSave, Date.now())!.state;
+    s.raid.next = 1e9;
+    const saved = { ...simOptions };
+    simOptions.runaway = 0;
+    try {
+      expect(s.cats).toHaveLength(3);
+      const full = () => s.buildings.filter((b) => isFull(s, b)).length;
+      let got = 0;
+      for (let i = 0; i < 6000; i++) {
+        const before = ITEM_IDS.map((id) => stock(s, id));
+        tick(s, DT);
+        ITEM_IDS.forEach((id, k) => (got += Math.max(0, stock(s, id) - before[k])));
+      }
+      // 10 分で本部に届いた数。運搬量 1 で不足を優先し、止まった建物を届け先に選んでいたときは 17 個（止まった建物は 8）、今は 72 個（6）
+      expect(got).toBeGreaterThanOrEqual(60);
+      expect(full()).toBeLessThanOrEqual(7);
+    } finally {
+      Object.assign(simOptions, saved);
+    }
+  });
+
+  /** 鉄鉱石の採掘機と、出力が満杯で止まった炉（どちらも出力が満杯）。猫 2 匹は本部に */
+  function stalledFurnace() {
+    const s = initialState(4);
+    s.cats.length = 2;
+    s.ores = [{ x: -4, y: 2, k: 'ironOre' }];
+    expect(placeBuilding(s, 'miner', -4, 2)).toBeNull();
+    expect(placeBuilding(s, 'furnace', -3, 3, 'ironPlate')).toBeNull();
+    s.store = {};
+    const [hq, miner, furnace] = s.buildings;
+    Object.assign(miner, { out: 'ironOre', output: bufferCap(miner) });
+    Object.assign(furnace, { out: 'ironPlate', output: bufferCap(furnace), input: { coal: bufferCap(furnace) } });
+    const job = () => s.cats.find((c) => c.src === miner.id && c.state !== 'idle');
+    return { s, hq, furnace, job };
+  }
+
+  it('満杯の出荷元の受け取れる建物が止まっていれば本部へ運ぶ', () => {
+    const { s, hq, job } = stalledFurnace();
+    tick(s, DT);
+    expect(job()?.dst).toBe(hq.id);
+  });
+
+  it('本部が満杯なら、最後の手段として止まっている建物へ運ぶ', () => {
+    const { s, furnace, job } = stalledFurnace();
+    s.store.ironOre = storeCap(s);
+    tick(s, DT);
+    expect(job()?.dst).toBe(furnace.id);
+  });
+
+  it('満杯で止まった出荷元を、不足しているだけの建物への補給より先に拾う', () => {
+    const s = initialState(4);
+    s.cats.length = 1;
+    s.ores = [{ x: 2, y: 0, k: 'ironOre' }, { x: -6, y: -6, k: 'stone' }];
+    expect(placeBuilding(s, 'miner', 2, 0)).toBeNull();
+    expect(placeBuilding(s, 'furnace', 3, 0, 'ironPlate')).toBeNull();
+    expect(placeBuilding(s, 'miner', -6, -6)).toBeNull();
+    s.store = {};
+    const [hq, iron, furnace, stone] = s.buildings;
+    Object.assign(iron, { out: 'ironOre', output: 3 });
+    Object.assign(stone, { out: 'stone', output: bufferCap(stone) });
+    // 鉄鉱石は 1 回分あるが 2 回分ない（不足。作っている途中なので、この tick では使わない）。近くの採掘機にあるが、遠くの止まった採掘機が先
+    Object.assign(furnace, { input: { ironOre: 1, coal: bufferCap(furnace) }, running: true, cur: 'ironPlate', out: 'ironPlate', progress: 0 });
+    tick(s, DT);
+    expect(s.cats[0]).toMatchObject({ src: stone.id, dst: hq.id, item: 'stone' });
+  });
 
   it('材料待ちの行に、品の所在と運ばれない理由を出す', () => {
     const s = initialState(4);
