@@ -552,7 +552,7 @@ export const buildingCost = (_s: GameState, type: BuildingType): Cost => BUILDIN
 export const catCount = (s: GameState) => s.cats.filter((c) => !c.robot).length;
 export const robotCount = (s: GameState) => s.cats.length - catCount(s);
 export const hireCost = (s: GameState) =>
-  Math.floor(100 * 1.5 ** catCount(s) * 0.7 ** count(s, ['herd1', 'herd2']));
+  Math.floor(70 * 1.4 ** catCount(s) * 0.7 ** count(s, ['herd1', 'herd2']));
 export const expandCost = (s: GameState) => 500 * 2 ** s.expansions;
 export const infiniteCost = (s: GameState, id: InfiniteId) => Math.floor(INFINITE[id].base * 1.6 ** level(s, id));
 export const buildingAt = (s: GameState, x: number, y: number) => s.buildings.find((b) => b.x === x && b.y === y);
