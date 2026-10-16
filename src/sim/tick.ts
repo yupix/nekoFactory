@@ -1,4 +1,4 @@
-import { CRAFT_FATIGUE, FACILITY, HAND, ITEM_IDS, ITEMS, RAID, RECIPES, RECIPES_OF, ROBOT, RUNAWAY, STAT_GROWTH, TEMPERS, WORK_STAT, type BuildingType, type ItemId, type StatId } from './data';
+import { CRAFT_FATIGUE, FACILITY, HAND, ITEM_IDS, ITEMS, RAID, RECIPES, RECIPES_OF, ROBOT, RUNAWAY, SQUEEZE, STAT_GROWTH, TEMPERS, WORK_STAT, type BuildingType, type ItemId, type StatId } from './data';
 import { awayTick, stepAway } from './away';
 import { assignJobs, inputTotal } from './haul';
 import { buildLifts, liftTick, type LiftGraph } from './lift';
@@ -333,20 +333,21 @@ export class Ctx {
       if (c.spot) this.spots.set(c.spot, (this.spots.get(c.spot) ?? 0) + 1);
     }
   }
+  /** 猫の経路（建物はすり抜けられる） */
   bfs(x: number, y: number) {
-    return bfs(this.size, this.L.grid, x, y);
+    return bfs(this.size, this.L.grid, x, y, SQUEEZE.cost);
   }
   fromBuilding(b: Building) {
     let r = this.L.from.get(b.id);
     if (!r) this.L.from.set(b.id, (r = this.bfs(b.x, b.y)));
     return r;
   }
-  /** タイルを起点とする BFS（盤面が変わるまで使い回す） */
+  /** タイルを起点とする犬の BFS（建物はすり抜けない。盤面が変わるまで使い回す） */
   fromTile(x: number, y: number) {
     const h = this.size / 2;
     const k = (y + h) * this.size + x + h;
     let r = this.L.tiles.get(k);
-    if (!r) this.L.tiles.set(k, (r = this.bfs(x, y)));
+    if (!r) this.L.tiles.set(k, (r = bfs(this.size, this.L.grid, x, y)));
     return r;
   }
   at(x: number, y: number) {
@@ -655,7 +656,10 @@ export function move(s: GameState, ctx: Ctx, cat: Cat, dt: number) {
     cat.wait -= dt;
     return;
   }
-  if (cat.path.length === 0) return;
+  if (cat.path.length === 0) {
+    cat.sq = cat.thru = false;
+    return;
+  }
   const n = cat.path[0];
   let dx = n.x - cat.nx;
   let dy = n.y - cat.ny;
@@ -688,7 +692,10 @@ export function move(s: GameState, ctx: Ctx, cat: Cat, dt: number) {
   }
   cat.off += ((wide ? WIDE : cat.lane) - cat.off) * (1 - Math.exp(-dt * 6));
 
-  let rem = Math.min(catSpeedOf(s, cat) * (cat.away ? RUNAWAY.speed : 1) * dt, maxStep);
+  // すり抜け: 通り抜ける建物のタイルへ向かう間と、その中心を過ぎて出ていく間は細くなってゆっくり歩く
+  const squeezing = () => cat.path.length > 0 && (!!cat.thru || (cat.path.length > 1 && ctx.blocked(cat.path[0].x, cat.path[0].y)));
+  cat.sq = squeezing();
+  let rem = Math.min(catSpeedOf(s, cat) * (cat.away ? RUNAWAY.speed : 1) * (cat.sq ? SQUEEZE.speed : 1) * dt, maxStep);
   while (rem > 0 && cat.path.length > 0) {
     const t = target(s, ctx, cat);
     const d = Math.hypot(t.x - cat.x, t.y - cat.y);
@@ -698,6 +705,7 @@ export function move(s: GameState, ctx: Ctx, cat: Cat, dt: number) {
       const p = cat.path.shift()!;
       cat.nx = p.x;
       cat.ny = p.y;
+      cat.thru = cat.path.length > 0 && ctx.blocked(p.x, p.y);
       rem -= d;
     } else {
       cat.x += ((t.x - cat.x) / d) * rem;
@@ -735,8 +743,9 @@ function target(s: GameState, ctx: Ctx, cat: Cat) {
     return { x: n.x - ax * back + ay * lat, y: n.y - ay * back - ax * lat };
   }
   if (cat.spot) ctx.setSpot(cat, 0);
-  // 左側通行: 進行方向 (hx, hy) の左は (hy, -hx)
-  return { x: n.x + cat.hy * cat.off, y: n.y - cat.hx * cat.off };
+  // 左側通行: 進行方向 (hx, hy) の左は (hy, -hx)。通り抜ける建物のタイルは、中心ではなく隣との隙間（タイルの端）を通る
+  const off = cat.path.length > 1 && ctx.blocked(n.x, n.y) ? SQUEEZE.side : cat.off;
+  return { x: n.x + cat.hy * off, y: n.y - cat.hx * off };
 }
 
 /** 押し離す対象（猫と犬） */

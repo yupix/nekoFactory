@@ -1,4 +1,4 @@
-import { AMMO_CAP, BUFFER_CAP, BUILDINGS, CAT_COLORS, CAT_NAMES, DEPOSIT, FACILITY, GOOD_BONUS, GRID, HAND, HAND_QUEUE, INFINITE, ITEM_IDS, ITEMS, KEEP, LIFT, MULTI_RECIPE, ORES, RAID, RECIPE_IDS, RECIPES, RECIPES_OF, RESEARCH, ROBOT, RUNAWAY, START_STORE, STAT_IDS, STATS, STORE, SUPPLY, TEMPERS, WEAPONS, WORK_STAT, type BuildingType, type CatColor, type Cost, type DogKind, type HandId, type InfiniteId, type ItemId, type OreId, type RecipeId, type ResearchId, type StatId, type Temper } from './data';
+import { AMMO_CAP, BUFFER_CAP, BUILDINGS, CAT_COLORS, CAT_NAMES, DEPOSIT, FACILITY, GOOD_BONUS, GRID, HAND, HAND_QUEUE, INFINITE, ITEM_IDS, ITEMS, KEEP, LIFT, MULTI_RECIPE, ORES, RAID, RECIPE_IDS, RECIPES, RECIPES_OF, RESEARCH, ROBOT, RUNAWAY, START_STORE, STAT_IDS, STATS, SQUEEZE, STORE, SUPPLY, TEMPERS, WEAPONS, WORK_STAT, type BuildingType, type CatColor, type Cost, type DogKind, type HandId, type InfiniteId, type ItemId, type OreId, type RecipeId, type ResearchId, type StatId, type Temper } from './data';
 import { bfs, occupancy } from './path';
 
 export interface Building {
@@ -149,6 +149,10 @@ export interface Cat {
   amount: number;
   src: number;
   dst: number;
+  /** 建物の隙間をすり抜けている（通り抜けるタイルへ向かう間と、その中心を過ぎて出ていく間。描画は細くなる） */
+  sq?: boolean;
+  /** 最後に通った経路の点が、通り抜けた建物のタイルだった */
+  thru?: boolean;
   name: string;
   /** 元気（0〜1）。働くと減る */
   energy: number;
@@ -1021,7 +1025,7 @@ export function repath(s: GameState, c: Cat) {
   if (c.state === 'idle') return;
   const t = s.buildings.find((b) => b.id === (c.state === 'toSource' ? c.src : c.dst));
   const size = gridSize(s);
-  const path = t && bfs(size, occupancy(size, s.buildings), Math.round(c.x), Math.round(c.y)).path(t.x, t.y);
+  const path = t && bfs(size, occupancy(size, s.buildings), Math.round(c.x), Math.round(c.y), SQUEEZE.cost).path(t.x, t.y);
   if (path) c.path = path;
   else {
     c.state = 'idle';

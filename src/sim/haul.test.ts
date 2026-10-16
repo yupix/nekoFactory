@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ITEM_IDS, ORES, RECIPES, type BuildingType, type ItemId, type RecipeId } from './data';
+import { ITEM_IDS, ORES, RECIPES, SQUEEZE, type BuildingType, type ItemId, type RecipeId } from './data';
 import { haulStatus, isFreeCarrier, needOf } from './haul';
 import { bfs, occupancy, type Bfs } from './path';
 import { accepts, bufferCap, gridSize, hireCat, initialState, keepOf, placeBuilding, rand, stock, storeCap, type Building, type Cat, type GameState } from './state';
@@ -37,7 +37,7 @@ function randomFactory(seed: number) {
   for (let i = 0; i < n.furnace; i++) put('furnace', pick([null, 'ironPlate', 'copperPlate', 'brick'] as const));
   for (let i = 0; i < n.assembler; i++) put('assembler', pick([null, 'gear', 'wire', 'circuit', 'redPack'] as const));
   if (rand(r) < 0.5) put('lab');
-  // 障害: 建物を 1 つ柵で囲う（届かない）こともある。ほかに柵を散らす
+  // 障害: 建物を 1 つ柵で囲う（猫はすり抜けて届く）こともある。ほかに柵を散らす
   if (rand(r) < 0.6) {
     const b = pick(s.buildings.filter((x) => x.type !== 'hq'));
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) placeBuilding(s, 'fence', b.x + dx, b.y + dy);
@@ -81,7 +81,8 @@ function checker(s: GameState) {
   const size = gridSize(s);
   const grid = occupancy(size, s.buildings);
   const cache = new Map<number, Bfs>();
-  const from = (b: Building) => cache.get(b.id) ?? (cache.set(b.id, bfs(size, grid, b.x, b.y)), cache.get(b.id)!);
+  // 猫は建物や柵をすり抜けるので、柵で囲った建物にも届く
+  const from = (b: Building) => cache.get(b.id) ?? (cache.set(b.id, bfs(size, grid, b.x, b.y, SQUEEZE.cost)), cache.get(b.id)!);
   const reaches = (b: Building, c: Cat) => {
     const t = tileOf(c);
     return from(b).dist(t.x, t.y) >= 0;
@@ -218,11 +219,12 @@ describe('運搬の割当（需要優先）', () => {
     // 本部の在庫が確保数以下
     s.store.coal = 8;
     expect(row('coal')).toEqual({ item: 'coal', where: ['本部に 8（確保 10）'], reason: '本部の在庫が確保数以下' });
-    // 柵で囲うと道が通じない
+    // 柵で囲っても、猫はすり抜けるので道は通じている
     s.store.brick = 100;
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) placeBuilding(s, 'fence', furnace.x + dx, furnace.y + dy);
-    s.cats.length = 1;
-    expect(row('ironOre')?.reason).toBe('道が通じていない');
+    s.cats.length = 0;
+    hireCat(s);
+    expect(row('ironOre')?.reason).toBe('割り当て待ち');
     expect(hq.type).toBe('hq');
   });
 });

@@ -92,6 +92,8 @@ interface View {
   hop: number;
   dir: THREE.Vector2;
   dive: number;
+  /** 建物の隙間をすり抜ける細さ（0〜1） */
+  sq: number;
   /** 施設の台やクッションの高さ */
   lift: number;
   /** 補間した sim 上の位置 */
@@ -287,6 +289,7 @@ export function createCats(parent: THREE.Object3D, items: Items, fx: Fx, sound: 
       hop: 0,
       dir: new THREE.Vector2(0, -1),
       dive: 1,
+      sq: 0,
       lift: 0,
       ix: c.x,
       iy: c.y,
@@ -545,11 +548,17 @@ export function createCats(parent: THREE.Object3D, items: Items, fx: Fx, sound: 
     }
   }
 
+  /** 体の向きと大きさ。すり抜けている間は横に細く、前後に長く、少し低くなる */
+  function rootAt(w: View, S: number) {
+    const k = w.sq;
+    root.compose(w.pos, q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, w.yaw), s.set(S * (1 - 0.55 * k), S * (1 - 0.18 * k), S * (1 + 0.3 * k)));
+  }
+
   function draw(w: View, sad = false) {
     // 関節を組む
     const S = SCALE * w.dive;
     if (S < 0.01) return;
-    root.compose(w.pos, q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, w.yaw), s.setScalar(S));
+    rootAt(w, S);
     const hopY = w.hop > 0 ? Math.sin((1 - w.hop) * Math.PI) * 0.09 : 0;
     B.multiplyMatrices(root, T.compose(v.set(0, CAT.bodyY + p.y + hopY, p.z), q.setFromEuler(e.set(p.pitch, 0, p.roll)), s.setScalar(1)));
     const coat = w.coat;
@@ -624,7 +633,7 @@ export function createCats(parent: THREE.Object3D, items: Items, fx: Fx, sound: 
   function drawRobot(w: View, eye: THREE.Color, tip: THREE.Color) {
     const S = SCALE * w.dive;
     if (S < 0.01) return;
-    root.compose(w.pos, q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, w.yaw), s.setScalar(S));
+    rootAt(w, S);
     const hopY = w.hop > 0 ? Math.sin((1 - w.hop) * Math.PI) * 0.06 : 0;
     B.multiplyMatrices(root, T.compose(v.set(0, CAT.bodyY + p.y + hopY, p.z), q.setFromEuler(eYXZ.set(p.pitch, 0, p.roll)), s.setScalar(1)));
     robot.body.push(B);
@@ -831,6 +840,7 @@ export function createCats(parent: THREE.Object3D, items: Items, fx: Fx, sound: 
         const heavy = HEAVY(w.item);
         w.phase += dist / (heavy ? 0.17 : 0.24);
         w.walk += ((walking ? 1 : 0) - w.walk) * damp(10, dt);
+        w.sq += ((c.sq ? 1 : 0) - w.sq) * damp(8, dt);
         w.hop = Math.max(0, w.hop - dt / 0.3);
 
         if (w.robot) {
@@ -991,7 +1001,8 @@ export function createCats(parent: THREE.Object3D, items: Items, fx: Fx, sound: 
         if (now > w.blinkAt + 0.16) w.blinkAt = now + 1.8 + Math.random() * 4;
         if (now >= w.blinkAt) p.blink = Math.max(p.blink, Math.sin(((now - w.blinkAt) / 0.16) * Math.PI));
         w.dive = Math.min(w.dive, 1);
-        draw(w, leaving);
+        // すり抜けている間は耳を伏せる
+        draw(w, leaving || w.sq > 0.5);
         if (wk && w.work > 0.05 && w.dive > 0.01) workProps(w, w.work, wk, dt, w.doneT === now);
       }
       for (const id of views.keys()) if (!seen.has(id)) views.delete(id);

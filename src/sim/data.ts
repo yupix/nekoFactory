@@ -180,6 +180,11 @@ export const DOGS: Record<DogKind, { name: string; speed: number; hp: number; at
  * 猫が逃げる距離と秒数・逃げない勇敢の値
  */
 export const RAID = { first: 900, every: 300, limit: 120, dogSpeed: 1.4, flee: 2.5, fleeT: 2, brave: 50 };
+/**
+ * 猫のすり抜け: 建物や柵のタイルを細くなって通り抜ける。通り抜けは空いたタイル cost 枚ぶん余計にかかるとみなし（空いた道があればそちらを選ぶ）、
+ * 速さは speed 倍、タイルの中心から side だけ横（建物の隙間）を通る。犬はすり抜けない
+ */
+export const SQUEEZE = { cost: 3, speed: 0.5, side: 0.42 };
 /** 敷地の外側に広がる野原と砂浜の幅（タイル）。船はこの外の海に着く */
 export const RING = 7.5;
 

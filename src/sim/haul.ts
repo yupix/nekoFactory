@@ -1,4 +1,4 @@
-import { BUILDINGS, ITEM_IDS, RECIPES, ROBOT, SUPPLY, type ItemId } from './data';
+import { BUILDINGS, ITEM_IDS, RECIPES, ROBOT, SQUEEZE, SUPPLY, type ItemId } from './data';
 import { bfs, occupancy, type Bfs } from './path';
 import { accepts, bufferCap, carryOf, gridSize, inputSpace, isBroken, keepOf, recipesOf, stock, storeCap, type Building, type Cat, type GameState } from './state';
 import { outputFull, simOptions, type Ctx } from './tick';
@@ -208,7 +208,7 @@ function reach(s: GameState, b: Building) {
   const size = gridSize(s);
   if (!uiBfs || uiBfs.ver !== s.layoutVersion || uiBfs.size !== size) uiBfs = { ver: s.layoutVersion, size, map: new Map() };
   let r = uiBfs.map.get(b.id);
-  if (!r) uiBfs.map.set(b.id, (r = bfs(size, occupancy(size, s.buildings), b.x, b.y)));
+  if (!r) uiBfs.map.set(b.id, (r = bfs(size, occupancy(size, s.buildings), b.x, b.y, SQUEEZE.cost)));
   return r;
 }
 const coord = (n: number) => (n < 0 ? `−${-n}` : String(n));

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { ITEM_IDS } from './data';
+import { ITEM_IDS, SQUEEZE } from './data';
 import { parseSave } from './save';
 import { outputStatus } from './haul';
-import { accepts, assignCat, buyResearch, cancelHand, handPlan, hireCat, initialState, launchRobot, missingSources, placeBuilding, placeLift, queueHand, removeBuilding, setOff, setRecipe, sourceHint, stock, storeCap, suppliedItems, type GameState } from './state';
+import { bfs, occupancy } from './path';
+import { accepts, assignCat, buyResearch, cancelHand, handPlan, hireCat, initialState, launchRobot, missingSources, placeBuilding, placeLift, queueHand, removeBuilding, setOff, setRecipe, sourceHint, stock, storeCap, suppliedItems, gridSize, type GameState } from './state';
 import { tick } from './tick';
 import userSave from './fixtures/user-save-iron-to-hq.json?raw';
 
@@ -609,7 +610,7 @@ describe('本部の手作業', () => {
     expect(handPlan(s, { ironPlate: 10, gear: 5 })).toEqual([{ id: 'gear', n: 3 }]);
   });
 
-  it('出力が満杯の建物の説明: 本部に空きがあれば運び手待ち、本部も満杯なら倉庫がいっぱい、道がなければ道がない', () => {
+  it('出力が満杯の建物の説明: 本部に空きがあれば運び手待ち、本部も満杯なら倉庫がいっぱい。柵で囲っても猫はすり抜けるので道はある', () => {
     const s = hand();
     s.ores.push({ x: 2, y: 0, k: 'ironOre' });
     s.store.ironPlate = 1000;
@@ -627,7 +628,7 @@ describe('本部の手作業', () => {
     s.store.ironOre = storeCap(s);
     expect(outputStatus(s, m)).toBe('倉庫がいっぱいです');
     for (const [x, y] of [[1, 0], [3, 0], [2, 1], [2, -1]]) placeBuilding(s, 'fence', x, y);
-    expect(outputStatus(s, m)).toBe('道が通じていません');
+    expect(outputStatus(s, m)).toBe('倉庫がいっぱいです');
   });
 });
 
@@ -722,5 +723,39 @@ describe('建物の停止', () => {
     expect(setOff(s, [m.id], true)).toBe('止められる建物がありません');
     expect(setOff(s, [a.id, b.id], false)).toBeNull();
     expect([a.off, b.off]).toEqual([undefined, undefined]);
+  });
+});
+
+describe('すり抜け', () => {
+  it('建物や柵で道が塞がっても、猫は細くなってすり抜けて運ぶ', () => {
+    const s = bare();
+    placeBuilding(s, 'fishing', -3, 0);
+    placeBuilding(s, 'cannery', 3, 0);
+    const [, can] = s.buildings;
+    // 島を縦に区切る柵の壁
+    const h = gridSize(s) / 2;
+    for (let y = -h; y < h; y++) expect(placeBuilding(s, 'fence', 0, y)).toBeNull();
+    const cat = s.cats[0];
+    Object.assign(cat, { x: -2, y: 0, nx: -2, ny: 0 });
+    let squeezed = 0;
+    for (let i = 0; i < 600; i++) {
+      tick(s, DT);
+      if (cat.sq) squeezed++;
+    }
+    expect(squeezed).toBeGreaterThan(0);
+    expect((can.input.fish ?? 0) + can.output * 2 + (can.running ? 2 : 0)).toBeGreaterThan(0);
+  });
+
+  it('空いた道が少しの回り道で済むならそちらを通り、遠ければすり抜ける', () => {
+    const size = 12;
+    const route = (gap: number) => {
+      // x = 0 の柵の壁に、y = gap の 1 か所だけ隙間
+      const walls = Array.from({ length: size }, (_, k) => ({ x: 0, y: k - size / 2 })).filter((p) => p.y !== gap);
+      return bfs(size, occupancy(size, walls), -1, 0, SQUEEZE.cost).path(1, 0)!;
+    };
+    // 隙間が 1 つ隣: 回り道（4 歩）の方が、すり抜け（1 + 1 + 3）より近い
+    expect(route(1).some((p) => p.x === 0 && p.y === 0)).toBe(false);
+    // 隙間が遠い: 壁をすり抜ける
+    expect(route(4).some((p) => p.x === 0 && p.y === 0)).toBe(true);
   });
 });
