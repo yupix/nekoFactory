@@ -1,8 +1,8 @@
 import type { Quality, QualityInfo } from '../render/scene';
 import type { CoatKey, ThumbKey } from '../render/thumbs';
 import { liftSpeed } from '../sim/lift';
-import { BUILDINGS, FACILITY, GOOD_BONUS, GRID, HAND, INFINITE, ITEMS, LIFT, MULTI_RECIPE, RAID, RECIPES, RECIPES_OF, RESEARCH, ROBOT, STAT_IDS, STATS, WEAPONS, WORK_STAT, type BuildingType, type Cost, type HandId, type InfiniteId, type ItemId, type RecipeId, type StatId } from '../sim/data';
-import { accepts, canPause, isLeaving, MOOD_NAME, moodOf, bufferCap, buildingCount, catCount, crafterCap, craftersOf, expandCost, facilityCap, facilityUsers, gridSize, handPlan, has, hireCost, hpBase, isBroken, isUnlocked, isWorking, liftLineCost, liftUpgradeCost, marketRate, maxHp, missing, missingSources, productionSpeed, recipesOf, recipeTime, recipeUnlocked, refundOf, repairAllCost, repairCost, researchBlocker, robotCount, sameSetup, sourceHint, statBonus, statLevel, stock, storeCap, suppliedItems, TIER_MAX, TIER_RESEARCH, tierSpeed, traitText, TUTORIAL, tutorialDone, upgradeBlocker, upgradeCost, uses, weaponDamage, weaponRange, type Building, type Cat, type GameState, type Lift } from '../sim/state';
+import { BUILDINGS, FACILITY, FUEL, GOOD_BONUS, GRID, HAND, INFINITE, ITEMS, LIFT, MULTI_RECIPE, RAID, RECIPES, RECIPES_OF, RESEARCH, ROBOT, STAT_IDS, STATS, WEAPONS, WORK_STAT, type BuildingType, type Cost, type HandId, type InfiniteId, type ItemId, type RecipeId, type StatId } from '../sim/data';
+import { accepts, canPause, isLeaving, MOOD_NAME, moodOf, bufferCap, buildingCount, catCount, crafterCap, craftersOf, expandCost, facilityCap, facilityUsers, fuelOut, gridSize, handPlan, has, hireCost, hpBase, isBroken, isUnlocked, isWorking, liftLineCost, liftUpgradeCost, marketRate, maxHp, missing, missingSources, productionSpeed, recipesOf, recipeTime, recipeUnlocked, refundOf, repairAllCost, repairCost, researchBlocker, robotCount, sameSetup, sourceHint, statBonus, statLevel, stock, storeCap, suppliedItems, TIER_MAX, TIER_RESEARCH, tierSpeed, traitText, TUTORIAL, tutorialDone, upgradeBlocker, upgradeCost, uses, usesFuel, weaponDamage, weaponRange, type Building, type Cat, type GameState, type Lift } from '../sim/state';
 import { haulStatus, outputStatus } from '../sim/haul';
 import { hasInputs, outputFull } from '../sim/tick';
 import type { Bus, GameAudio } from './audio';
@@ -71,7 +71,7 @@ const GROUPS: { label: string; cls: string; types: Slot[] }[] = [
 ];
 export const DESC: Record<BuildingType | 'lift', string> = {
   miner: '鉱床の上に置くと、その鉱石を掘り出す。',
-  furnace: '鉱石を焼いて鉄板・銅板・石レンガにする。',
+  furnace: `石炭を燃やして鉱石を焼き、鉄板・銅板・石レンガにする。石炭 1 個で ${FUEL.burn} 秒。`,
   assembler: '板から歯車・銅線・回路基板・研究パックを組み立てる。',
   fishing: '池で魚を釣り上げる。材料はいらない。',
   cannery: '魚をことこと煮て猫缶にする。',
@@ -521,7 +521,9 @@ export function createHud(h: HudHandlers) {
     if (t === 'warehouse') return `<div class="recipe"><i class="ic">${ICON.box}</i><span>倉庫の容量 各 +200</span></div>`;
     if (t === 'lab')
       return `<div class="recipe">${(['redPack', 'greenPack', 'bluePack'] as ItemId[]).map((id) => `${itemImg(id)}<b>${ITEMS[id].rp}</b>`).join('')}<i class="ic">${ICON.rp}</i>${timeHtml(2, s)}</div>`;
-    return `<div class="recipes">${(RECIPES_OF[t] ?? []).map((id) => recipeRow(id, s)).join('')}</div>`;
+    // 燃料を使う建物は、どのレシピにも燃料が要る
+    const fuel = FUEL.users.includes(t) ? `<div class="recipe">${itemImg(FUEL.item)}<b>×1</b>${ICON.arrow}<i class="ic">${ICON.bolt}</i><span>燃料 ${FUEL.burn}秒</span></div>` : '';
+    return `<div class="recipes">${(RECIPES_OF[t] ?? []).map((id) => recipeRow(id, s)).join('')}${fuel}</div>`;
   }
   function buildingTip(t: Slot, s: GameState) {
     const n = t === 'lift' ? s.lifts.length : buildingCount(s, t);
@@ -536,12 +538,13 @@ export function createHud(h: HudHandlers) {
   let infoId: number | null = null;
   /** 開いているカードの組み立ての目印（レシピや研究が変わったら作り直す） */
   let infoKey = '';
-  /** 建物が入力に受け取る品（研究所は研究パックの合計 1 行） */
+  /** 建物が入力に受け取る品（研究所は研究パックの合計 1 行。燃料を使う建物は燃料を必ず出す） */
   const inputsOf = (s: GameState, b: Building): ItemId[] => {
     const w = WEAPONS[b.type];
     if (w) return w.ammo ? [w.ammo] : [];
     const set = new Set<ItemId>();
     for (const id of recipesOf(s, b)) for (const i of Object.keys(RECIPES[id].in) as ItemId[]) set.add(i);
+    if (usesFuel(b)) set.add(FUEL.item);
     // レシピで使わない材料が残っていれば（本部が満杯で戻せなかった分）それも出す
     for (const i of Object.keys(b.input) as ItemId[]) if ((b.input[i] ?? 0) > 0) set.add(i);
     return [...set];
@@ -562,8 +565,11 @@ export function createHud(h: HudHandlers) {
     const def = BUILDINGS[b.type];
     const rows: string[] = [];
     if (b.type === 'lab') rows.push(`<div class="row" data-k="lab"><span class="any">研究パック</span><div class="meter"><i></i></div><b></b></div>`);
-    for (const id of inputsOf(s, b))
-      rows.push(`<div class="row" data-k="in:${id}">${itemImg(id)}<span>${ITEMS[id].name}${uses(s, b, id) ? '' : '<small>（使わない）</small>'}</span><div class="meter"><i></i></div><b></b></div><p class="haul" data-h="${id}" hidden></p>`);
+    for (const id of inputsOf(s, b)) {
+      const fuel = id === FUEL.item && usesFuel(b);
+      rows.push(`<div class="row" data-k="in:${id}">${itemImg(id)}<span>${ITEMS[id].name}${fuel ? '（燃料）' : uses(s, b, id) ? '' : '<small>（使わない）</small>'}</span><div class="meter"><i></i></div><b></b></div><p class="haul" data-h="${id}" hidden></p>`);
+      if (fuel) rows.push(`<div class="row" data-k="fuel"><i class="ic">${ICON.bolt}</i><span>燃料</span><div class="meter"><i></i></div><b></b></div>`);
+    }
     if (RECIPES_OF[b.type]) {
       rows.push(`<div class="row out" data-k="out"><span class="slot-it"></span><span class="out-name"></span><div class="meter"><i></i></div><b></b></div>`);
       rows.push(`<div class="row prog" data-k="prog"><i class="ic">${ICON.clock}</i><span>生産</span><div class="meter"><i></i></div><b></b></div>`);
@@ -620,7 +626,10 @@ export function createHud(h: HudHandlers) {
     const mixed =
       full && !!b.out && b.output < bufferCap(b) && !recipesOf(s, b).some((id) => (RECIPES[id].out ?? b.out) === b.out && (Object.keys(RECIPES[id].in) as ItemId[]).every((i) => (b.input[i] ?? 0) >= RECIPES[id].in[i]!));
     const waiting = (producer || b.type === 'lab') && !b.off && !b.running && !full && !hasInputs(s, b);
-    const none = waiting && producer ? missingSources(s, b, supplied) : [];
+    // 燃料切れ（作りかけのまま止まっていることもある）
+    const noFuel = producer && !b.off && !full && fuelOut(s, b);
+    // 作りかけで燃料切れのときは、燃料の供給元だけを見る
+    const none = producer && waiting ? missingSources(s, b, supplied) : noFuel ? missingSources(s, b, supplied).filter((i) => i === FUEL.item) : [];
     const fac = FACILITY[b.type];
     const used = fac ? facilityUsers(s, b) : 0;
     const broken = isBroken(b);
@@ -663,6 +672,8 @@ export function createHud(h: HudHandlers) {
                         : ['出力が満杯', 'full']
                       : none.length
                         ? ['材料なし', 'full']
+                        : noFuel
+                        ? ['燃料切れ', 'wait']
                         : waiting
                         ? ['材料待ち', 'wait']
                         : ['稼働中', 'ok'];
@@ -683,6 +694,7 @@ export function createHud(h: HudHandlers) {
     }
     if (b.type === 'lab') set('lab', Object.values(b.input).reduce((a, n) => a + (n ?? 0), 0), cap);
     for (const id of inputsOf(s, b)) set(`in:${id}`, b.input[id] ?? 0, cap);
+    if (usesFuel(b)) set('fuel', b.fuel ?? 0, FUEL.burn, `${Math.ceil(b.fuel ?? 0)}秒`);
     // 材料待ちの行: 品の所在と、運ばれない理由（判定は sim 側）
     const status = waiting || (w && empty) ? haulStatus(s, b, inputsOf(s, b).filter((id) => accepts(s, b, id))) : [];
     for (const p of info.querySelectorAll<HTMLElement>('.haul')) {
@@ -737,6 +749,8 @@ export function createHud(h: HudHandlers) {
                 : `出力がいっぱい。${outputStatus(s, b)}`
               : none.length
                 ? none.map(sourceHint).join('。')
+                : noFuel
+                ? `燃料切れ。${ITEMS[FUEL.item].name}が届くと動きます（1 個で ${FUEL.burn} 秒）`
                 : need
                 ? `${ITEMS[need].name}が届くのを待っています`
                 : b.type === 'lab' && waiting

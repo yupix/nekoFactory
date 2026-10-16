@@ -1,15 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { ITEM_IDS, SQUEEZE } from './data';
+import { FUEL, ITEM_IDS, SQUEEZE, type ItemId } from './data';
 import { parseSave } from './save';
 import { outputStatus } from './haul';
 import { bfs, occupancy } from './path';
-import { accepts, assignCat, buyResearch, cancelHand, handPlan, hireCat, initialState, launchRobot, missingSources, placeBuilding, placeLift, queueHand, removeBuilding, setOff, setRecipe, sourceHint, stock, storeCap, suppliedItems, gridSize, type GameState } from './state';
-import { tick } from './tick';
+import { accepts, assignCat, buyResearch, cancelHand, fuelOut, handPlan, hireCat, initialState, launchRobot, missingSources, placeBuilding, placeLift, queueHand, removeBuilding, setOff, setRecipe, sourceHint, stock, storeCap, suppliedItems, gridSize, type GameState } from './state';
+import { hasInputs, tick } from './tick';
 import userSave from './fixtures/user-save-iron-to-hq.json?raw';
 
 const DT = 0.1;
 const run = (s: GameState, seconds: number) => {
   for (let i = 0; i < Math.round(seconds / DT); i++) tick(s, DT);
+};
+/** 材料を毎 tick 足し、出力を取り除きながら回して、できた数を返す */
+const made = (s: GameState, b: GameState['buildings'][number], input: Partial<Record<ItemId, number>>, seconds: number) => {
+  let n = 0;
+  for (let i = 0; i < Math.round(seconds / DT); i++) {
+    Object.assign(b.input, input);
+    tick(s, DT);
+    n += b.output;
+    b.output = 0;
+  }
+  return n;
 };
 /** 本部のない島。猫 1 匹（cats: false なら猫なし）、資材はたっぷり */
 function bare(cats = true) {
@@ -51,7 +62,7 @@ describe('素材経済', () => {
     expect(s.buildings[0]).toMatchObject({ output: 1, out: 'copperOre' });
   });
 
-  it('石の炉が鉄鉱石 + 石炭で鉄板を作る。レシピを固定するとそれしか作らない', () => {
+  it('石の炉が石炭を燃やして鉄鉱石から鉄板を作る。レシピを固定するとそれしか作らない', () => {
     const s = bare(false);
     placeBuilding(s, 'furnace', 0, 0);
     const b = s.buildings[0];
@@ -60,6 +71,7 @@ describe('素材経済', () => {
     expect(b.output).toBe(0);
     run(s, 0.1);
     expect(b).toMatchObject({ output: 1, out: 'ironPlate', input: { ironOre: 0, coal: 0, stone: 2 } });
+    expect(b.fuel).toBeCloseTo(21);
     // 出力に鉄板がある間は、別の品（石レンガ）は作らない
     run(s, 5);
     expect(b.output).toBe(1);
@@ -69,8 +81,75 @@ describe('素材経済', () => {
     expect(b.output).toBe(0);
     expect(setRecipe(s, b.id, 'steel')).toBe('未解放のレシピです');
     expect(setRecipe(s, b.id, 'brick')).toBeNull();
+    // 残った燃料で石レンガを作る
     run(s, 2);
     expect(b).toMatchObject({ output: 1, out: 'brick' });
+    expect(b.fuel).toBeCloseTo(19);
+  });
+
+  it('燃料: 石炭 1 個で鉄板 8 枚。燃え尽きると作りかけのまま止まり、石炭が届くと続きから作る', () => {
+    const s = bare(false);
+    placeBuilding(s, 'furnace', 0, 0, 'ironPlate');
+    const b = s.buildings[0];
+    b.input = { ironOre: 10, coal: 1 };
+    run(s, 40);
+    // 24 秒でちょうど 8 枚。9 枚目は燃料がないので始めない
+    expect(b).toMatchObject({ output: 8, running: false, fuel: 0, input: { ironOre: 2, coal: 0 } });
+    expect(fuelOut(s, b)).toBe(true);
+    expect(hasInputs(s, b)).toBe(false);
+    // 作りかけの途中で燃え尽きると、作りかけのまま止まる
+    b.fuel = 1.5;
+    run(s, 5);
+    expect(b).toMatchObject({ output: 8, running: true, fuel: 0, input: { ironOre: 1, coal: 0 } });
+    expect(b.progress).toBeCloseTo(1.5);
+    expect(fuelOut(s, b)).toBe(true);
+    b.input.coal = 1;
+    run(s, 1.5);
+    expect(b).toMatchObject({ output: 9, input: { coal: 0 } });
+    expect(b.fuel).toBeCloseTo(FUEL.burn - 1.5);
+  });
+
+  it('燃料は生産が進んでいる間だけ減る', () => {
+    const s = bare(false);
+    placeBuilding(s, 'furnace', 0, 0, 'ironPlate');
+    const b = s.buildings[0];
+    b.fuel = FUEL.burn;
+    run(s, 30);
+    expect(b).toMatchObject({ fuel: FUEL.burn, output: 0, running: false });
+    expect(fuelOut(s, b)).toBe(false);
+  });
+
+  it('石レンガにも燃料が要る。石炭 1 個で石レンガ 12 個、鋼材 3 個', () => {
+    const s = bare(false);
+    s.researched.push('steel');
+    placeBuilding(s, 'furnace', 0, 0, 'brick');
+    placeBuilding(s, 'furnace', 2, 0, 'steel');
+    placeBuilding(s, 'furnace', 4, 0, 'copperPlate');
+    const [brick, steel, copper] = s.buildings;
+    brick.input = { stone: 10 };
+    run(s, 5);
+    expect(brick).toMatchObject({ output: 0, running: false });
+    expect(hasInputs(s, brick)).toBe(false);
+    expect(fuelOut(s, brick)).toBe(true);
+    brick.input.coal = 1;
+    expect(made(s, brick, { stone: 10 }, 60)).toBe(12);
+    steel.input.coal = 1;
+    expect(made(s, steel, { ironPlate: 10 }, 60)).toBe(3);
+    copper.input.coal = 1;
+    expect(made(s, copper, { copperOre: 10 }, 60)).toBe(8);
+  });
+
+  it('石レンガに固定した炉も石炭を受け取り、猫が本部の石炭を運んでくる', () => {
+    const s = initialState(4);
+    s.ores = [];
+    placeBuilding(s, 'furnace', 3, 0, 'brick');
+    const b = s.buildings[1];
+    expect(accepts(s, b, 'coal')).toBe(true);
+    expect(accepts(s, b, 'ironOre')).toBe(false);
+    run(s, 30);
+    expect(b.out).toBe('brick');
+    expect(stock(s, 'coal')).toBeLessThan(30);
+    expect((b.fuel ?? 0) + (b.input.coal ?? 0)).toBeGreaterThan(0);
   });
 
   it('資材が足りなければ建てられず、建てると倉庫から引かれ、撤去で 50% 戻る', () => {
@@ -114,6 +193,8 @@ describe('素材経済', () => {
     placeBuilding(s, 'miner', 1, 0);
     placeBuilding(s, 'furnace', 3, 0, 'brick');
     const [miner, furnace] = s.buildings;
+    // 本部がないので燃料は入れておく
+    furnace.input.coal = 1;
     run(s, 10);
     expect(furnace.input.ironOre ?? 0).toBe(0);
     expect(miner.output).toBeGreaterThan(0);
@@ -477,6 +558,7 @@ describe('供給と運搬の規則', () => {
     placeBuilding(s, 'assembler', 2, 0, 'wire');
     const [furnace, asm] = s.buildings;
     s.store = {};
+    // 石炭は燃料として要る（供給元がなく、燃料も入力の石炭もない）
     expect(missingSources(s, furnace)).toEqual(['copperOre', 'coal']);
     // 銅板を作る炉はあるが、その炉に銅鉱石が来ないので銅板も供給元なし
     expect(missingSources(s, asm)).toEqual(['copperPlate']);
@@ -490,6 +572,12 @@ describe('供給と運搬の規則', () => {
     expect(missingSources(s, asm)).toEqual([]);
     // 入力に揃っていれば警告しない
     s.store = {};
+    // 燃え残りがあれば石炭がなくてもよい。材料が揃っていても燃料切れなら石炭
+    furnace.input = { copperOre: 1 };
+    furnace.fuel = 5;
+    expect(missingSources(s, furnace)).toEqual([]);
+    furnace.fuel = 0;
+    expect(missingSources(s, furnace)).toEqual(['coal']);
     furnace.input = { copperOre: 1, coal: 1 };
     expect(missingSources(s, furnace)).toEqual([]);
     // 自動は作れるレシピが 1 つでもあれば警告しない（炉の入力の銅鉱石で銅板 → 銅線が作れる）
@@ -723,6 +811,25 @@ describe('建物の停止', () => {
     expect(setOff(s, [m.id], true)).toBe('止められる建物がありません');
     expect(setOff(s, [a.id, b.id], false)).toBeNull();
     expect([a.off, b.off]).toEqual([undefined, undefined]);
+  });
+});
+
+describe('燃料の供給元', () => {
+  it('鉄鉱石の採掘機と炉だけでは鉄板の供給元にならず、石炭の採掘機を足すとなる', () => {
+    const s = bare(false);
+    s.ores.push({ x: 0, y: 0, k: 'ironOre' }, { x: 4, y: 0, k: 'coal' });
+    placeBuilding(s, 'miner', 0, 0);
+    placeBuilding(s, 'furnace', 2, 0, 'ironPlate');
+    s.store = {};
+    expect(suppliedItems(s).has('ironPlate')).toBe(false);
+    // 燃え残りがあれば作れる
+    s.buildings[1].fuel = 1;
+    expect(suppliedItems(s).has('ironPlate')).toBe(true);
+    s.buildings[1].fuel = 0;
+    s.store = { ironPlate: 1000, gear: 1000, stone: 1000 };
+    expect(placeBuilding(s, 'miner', 4, 0)).toBeNull();
+    s.store = {};
+    expect(suppliedItems(s).has('ironPlate')).toBe(true);
   });
 });
 

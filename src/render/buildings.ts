@@ -756,7 +756,7 @@ export function createBuildings(parent: THREE.Object3D, items: Items, fx: Fx, no
         }
         const def = BUILDINGS[b.type];
         const broken = isBroken(b);
-        const running = (def.time ? b.running : true) && !broken;
+        const running = (def.time ? b.running && (b.type !== 'furnace' || (b.fuel ?? 0) > 0) : true) && !broken;
         const team = crew.get(b.id);
         // 耐久: 噛まれると揺れて土ぼこり、壊れた瞬間は煙が噴き、故障中は煙がくすぶる
         const max = maxHp(s, b);

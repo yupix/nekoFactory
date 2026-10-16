@@ -1,10 +1,10 @@
-import { CRAFT_FATIGUE, FACILITY, HAND, ITEM_IDS, ITEMS, RAID, RECIPES, RECIPES_OF, ROBOT, RUNAWAY, SQUEEZE, STAT_GROWTH, TEMPERS, WORK_STAT, type BuildingType, type ItemId, type StatId } from './data';
+import { CRAFT_FATIGUE, FACILITY, FUEL, HAND, ITEM_IDS, ITEMS, RAID, RECIPES, RECIPES_OF, ROBOT, RUNAWAY, SQUEEZE, STAT_GROWTH, TEMPERS, WORK_STAT, type BuildingType, type ItemId, type StatId } from './data';
 import { awayTick, stepAway } from './away';
 import { assignJobs, inputTotal } from './haul';
 import { buildLifts, liftTick, type LiftGraph } from './lift';
 import { bfs, occupancy, type Bfs } from './path';
 import { heal, nearestDog, raidTick } from './raid';
-import { accepts, addStore, bufferCap, catSpeedOf, endRest, facilityCap, facilityRecover, fatigueRate, gridSize, isBroken, isWeapon, isWorking, labBonus, marketRate, productionSpeed, rand, recipesOf, repath, statBonus, statLevel, stock, storeCap, tierSpeed, toStore, tradeMultiplier, TUTORIAL, type Building, type Cat, type GameState, type Rest } from './state';
+import { accepts, addStore, bufferCap, catSpeedOf, endRest, facilityCap, facilityRecover, fatigueRate, gridSize, hasFuel, isBroken, isWeapon, isWorking, labBonus, marketRate, productionSpeed, rand, recipesOf, repath, statBonus, statLevel, stock, storeCap, tierSpeed, toStore, tradeMultiplier, TUTORIAL, usesFuel, type Building, type Cat, type GameState, type Rest } from './state';
 
 /**
  * 市場への納品と研究所の消費（浮遊テキスト用）、猫のステータスの Lv UP（cat と stat 付き）、襲撃の出来事。
@@ -138,10 +138,11 @@ function ready(s: GameState, b: Building) {
   return null;
 }
 
-/** 生産が始められるか（研究所は品があるか） */
+/** 生産が始められるか（研究所は品があるか。燃料を使う建物は燃え残りか入力の燃料も要る） */
 export function hasInputs(s: GameState, b: Building) {
   if (b.type === 'lab') return inputTotal(b) > 0;
   if (!RECIPES_OF[b.type]) return false;
+  if (usesFuel(b) && !hasFuel(b)) return false;
   return recipesOf(s, b).some((id) => (Object.keys(RECIPES[id].in) as ItemId[]).every((i) => (b.input[i] ?? 0) >= RECIPES[id].in[i]!));
 }
 /** 出力が満杯で止まっている */
@@ -152,7 +153,9 @@ function produce(s: GameState, b: Building, dt: number, events: GameEvent[]) {
   if (isBroken(b) || b.off) return;
   if (b.type === 'lab') return research(s, b, dt, events);
   if (!RECIPES_OF[b.type]) return;
+  const fuel = usesFuel(b);
   if (!b.running) {
+    if (fuel && !hasFuel(b)) return;
     const id = ready(s, b);
     if (!id) return;
     const r = RECIPES[id];
@@ -161,6 +164,15 @@ function produce(s: GameState, b: Building, dt: number, events: GameEvent[]) {
     b.out = r.out ?? b.out;
     b.running = true;
     b.progress = 0;
+  }
+  // 燃料: 燃え尽きていたら入力の燃料を 1 個くべる。なければ作りかけのまま待つ。燃えるのは進んだ分だけ
+  if (fuel) {
+    if ((b.fuel ?? 0) <= 0) {
+      if ((b.input[FUEL.item] ?? 0) < 1) return;
+      b.input[FUEL.item]!--;
+      b.fuel = (b.fuel ?? 0) + FUEL.burn;
+    }
+    b.fuel = Math.max(0, b.fuel! - dt);
   }
   b.progress += dt;
   const r = RECIPES[b.cur!];

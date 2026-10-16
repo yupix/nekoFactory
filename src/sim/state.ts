@@ -1,4 +1,4 @@
-import { AMMO_CAP, BUFFER_CAP, BUILDINGS, CAT_COLORS, CAT_NAMES, DEPOSIT, FACILITY, GOOD_BONUS, GRID, HAND, HAND_QUEUE, INFINITE, ITEM_IDS, ITEMS, KEEP, LIFT, MULTI_RECIPE, ORES, RAID, RECIPE_IDS, RECIPES, RECIPES_OF, RESEARCH, ROBOT, RUNAWAY, START_STORE, STAT_IDS, STATS, SQUEEZE, STORE, SUPPLY, TEMPERS, WEAPONS, WORK_STAT, type BuildingType, type CatColor, type Cost, type DogKind, type HandId, type InfiniteId, type ItemId, type OreId, type RecipeId, type ResearchId, type StatId, type Temper } from './data';
+import { AMMO_CAP, BUFFER_CAP, BUILDINGS, CAT_COLORS, CAT_NAMES, DEPOSIT, FACILITY, FUEL, GOOD_BONUS, GRID, HAND, HAND_QUEUE, INFINITE, ITEM_IDS, ITEMS, KEEP, LIFT, MULTI_RECIPE, ORES, RAID, RECIPE_IDS, RECIPES, RECIPES_OF, RESEARCH, ROBOT, RUNAWAY, START_STORE, STAT_IDS, STATS, SQUEEZE, STORE, SUPPLY, TEMPERS, WEAPONS, WORK_STAT, type BuildingType, type CatColor, type Cost, type DogKind, type HandId, type InfiniteId, type ItemId, type OreId, type RecipeId, type ResearchId, type StatId, type Temper } from './data';
 import { bfs, occupancy } from './path';
 
 export interface Building {
@@ -23,6 +23,8 @@ export interface Building {
   hp: number;
   /** プレイヤーが止めた（生産せず、材料も受け取らない。出力は運び出す） */
   off?: boolean;
+  /** 燃料を使う建物の残りの燃焼秒（省略は 0） */
+  fuel?: number;
   /** 兵器の次の発射までの秒数 */
   cd?: number;
   /** リフトへ積む間隔の経過秒と、次に積むリフトの順番（市場は次に売る品の順番） */
@@ -530,14 +532,21 @@ export function recipeTime(b: Building) {
   const id = b.cur ?? b.recipe ?? RECIPES_OF[b.type]?.[0];
   return id ? RECIPES[id].time : BUILDINGS[b.type].time;
 }
+/** 燃料を使う建物か（石の炉） */
+export const usesFuel = (b: Building) => FUEL.users.includes(b.type);
+/** 燃え残りがあるか、入力に燃料（石炭）がある */
+export const hasFuel = (b: Building) => (b.fuel ?? 0) > 0 || (b.input[FUEL.item] ?? 0) >= 1;
+/** 燃料切れ: 燃料を使う建物で、燃え残りも入力の石炭もない */
+export const fuelOut = (_s: GameState, b: Building) => usesFuel(b) && !hasFuel(b);
 /** 建物がその品を入力に受け取るか。止めた建物は何も受け取らない */
 export const accepts = (s: GameState, b: Building, item: ItemId) => b.type === 'hq' || (!b.off && uses(s, b, item));
-/** 建物がその品を使うか（研究所は研究パック、兵器は弾、本部は何でも、生産建物は作れるレシピの材料） */
+/** 建物がその品を使うか（研究所は研究パック、兵器は弾、本部は何でも、生産建物は作れるレシピの材料。燃料を使う建物はレシピによらず燃料も） */
 export function uses(s: GameState, b: Building, item: ItemId) {
   if (b.type === 'hq') return true;
   if (b.type === 'lab') return !!ITEMS[item].rp;
   const w = WEAPONS[b.type];
   if (w) return w.ammo === item;
+  if (item === FUEL.item && usesFuel(b)) return true;
   return recipesOf(s, b).some((id) => RECIPES[id].in[item]);
 }
 /** 入力に入れられる残り（猫が運んでいる途中の分は数えない） */
@@ -667,7 +676,8 @@ export function setKeep(s: GameState, item: ItemId, n: number): string | null {
 
 /**
  * 供給元のある品: 本部の在庫が確保数を超えているか、その品を出す建物がある（採掘機は鉱床の鉱石、出力に在庫がある、
- * または材料に供給元があるか入力に揃っているレシピで作れる）。材料の供給元を鎖の元までたどる
+ * または材料に供給元があるか入力に揃っているレシピで作れる。燃料を使う建物は燃料にも供給元があるか、燃え残り・入力の石炭がある）。
+ * 材料の供給元を鎖の元までたどる
  */
 export function suppliedItems(s: GameState): Set<ItemId> {
   const set = new Set<ItemId>();
@@ -679,6 +689,7 @@ export function suppliedItems(s: GameState): Set<ItemId> {
       for (const id of b.off ? [] : recipesOf(s, b)) {
         const r = RECIPES[id];
         if (!r.out || set.has(r.out)) continue;
+        if (usesFuel(b) && !set.has(FUEL.item) && !hasFuel(b)) continue;
         if ((Object.keys(r.in) as ItemId[]).every((i) => set.has(i) || (b.input[i] ?? 0) >= r.in[i]!)) {
           set.add(r.out);
           grew = true;
@@ -690,17 +701,22 @@ export function suppliedItems(s: GameState): Set<ItemId> {
 export const hasSource = (s: GameState, item: ItemId) => suppliedItems(s).has(item);
 /**
  * 供給元がなく、入力にも足りない材料。固定レシピはそのレシピの材料、自動はどのレシピも作れないときだけ、足りない材料が一番少ないレシピの分。
- * 作れるレシピがあれば空
+ * 作れるレシピがあれば空。燃料を使う建物は、燃料に供給元がなく燃料切れなら燃料も足す（材料が揃っていても）
  */
 export function missingSources(s: GameState, b: Building, supplied = suppliedItems(s)): ItemId[] {
   let best: ItemId[] | null = null;
   for (const id of recipesOf(s, b)) {
     const r = RECIPES[id];
     const miss = (Object.keys(r.in) as ItemId[]).filter((i) => !supplied.has(i) && (b.input[i] ?? 0) < r.in[i]!);
-    if (!miss.length) return [];
+    if (!miss.length) {
+      best = [];
+      break;
+    }
     if (!best || miss.length < best.length) best = miss;
   }
-  return best ?? [];
+  const out = best ?? [];
+  if (!supplied.has(FUEL.item) && fuelOut(s, b) && !out.includes(FUEL.item)) out.push(FUEL.item);
+  return out;
 }
 /** 供給元のない材料の案内（「銅鉱石の供給元がありません。銅鉱石の鉱床に採掘機を置こう」） */
 export function sourceHint(item: ItemId) {

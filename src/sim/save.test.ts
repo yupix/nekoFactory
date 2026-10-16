@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { BACKUP_KEY, KEY, SAVE_VERSION, loadGame, saveGame, serialize } from './save';
-import { hireCat, initialState } from './state';
+import { BACKUP_KEY, KEY, SAVE_VERSION, loadGame, parseSave, saveGame, serialize } from './save';
+import { hireCat, initialState, setRecipe } from './state';
+import { simOptions, tick } from './tick';
+import ironToHq from './fixtures/user-save-iron-to-hq.json?raw';
+import stalledHq from './fixtures/user-save-stalled-hq.json?raw';
 
 const store = new Map<string, string>();
 Object.assign(globalThis, {
@@ -138,4 +141,29 @@ describe('save', () => {
     store.set(KEY, JSON.stringify({ version: 7, savedAt: NOW, state: many }));
     expect(loadGame(NOW).state.cats).toHaveLength(4);
   });
+
+  for (const [name, raw] of [['user-save-iron-to-hq', ironToHq], ['user-save-stalled-hq', stalledHq]] as const)
+    it(`燃料のない保存（${name}）も読めて、炉が石炭を燃やして動き出す`, () => {
+      const s = parseSave(raw, NOW)!.state;
+      s.raid.next = 1e9;
+      const saved = { ...simOptions };
+      simOptions.runaway = 0;
+      try {
+        const furnaces = s.buildings.filter((b) => b.type === 'furnace');
+        expect(furnaces.length).toBeGreaterThan(0);
+        expect(furnaces.every((b) => b.fuel === undefined)).toBe(true);
+        // 銅板に固定された炉には銅の供給元がないので、鉄板にする
+        for (const b of furnaces) if (b.recipe === 'copperPlate' && !s.buildings.some((m) => m.out === 'copperOre')) setRecipe(s, b.id, 'ironPlate');
+        const made = new Map(furnaces.map((b) => [b.id, 0]));
+        for (let i = 0; i < 1200; i++) {
+          const before = furnaces.map((b) => b.output);
+          tick(s, 0.1);
+          furnaces.forEach((b, k) => made.set(b.id, made.get(b.id)! + Math.max(0, b.output - before[k])));
+        }
+        expect(furnaces.every((b) => Number.isFinite(b.fuel ?? 0) && Number.isFinite(b.progress))).toBe(true);
+        expect(furnaces.some((b) => (b.fuel ?? 0) > 0 && made.get(b.id)! > 0)).toBe(true);
+      } finally {
+        Object.assign(simOptions, saved);
+      }
+    });
 });

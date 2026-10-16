@@ -194,10 +194,11 @@ describe('運搬の割当（需要優先）', () => {
         fullFor = iron.output >= bufferCap(iron) ? fullFor + DT : 0;
         maxFull = Math.max(maxFull, fullFor);
       }
-      // 2 匹・運搬量 2 でも採掘機の方が速いので満杯にはなるが、拾われずに止まり続けることはない
+      // 2 匹・運搬量 2 でも採掘機の方が速いので満杯にはなるが、拾われずに止まり続けることはない。
+      // 石炭は燃料で 8 枚に 1 個しか使わず、石炭の採掘機の出力も本部へ運ぶので、そのぶん猫の手が取られる（最長 12.9 秒）
       expect(delivered).toBeGreaterThanOrEqual(25);
       expect(made).toBeGreaterThanOrEqual(20);
-      expect(maxFull).toBeLessThan(12);
+      expect(maxFull).toBeLessThan(15);
     });
 
   it('再現: 出力が満杯で止まった建物ばかりのユーザーのセーブ（猫 3 匹）で、止まった出力が本部へ運ばれる', () => {
@@ -214,7 +215,7 @@ describe('運搬の割当（需要優先）', () => {
         tick(s, DT);
         ITEM_IDS.forEach((id, k) => (got += Math.max(0, stock(s, id) - before[k])));
       }
-      // 10 分で本部に届いた数。運搬量 1 で不足を優先し、止まった建物を届け先に選んでいたときは 17 個（止まった建物は 8）、今は 72 個（6）
+      // 10 分で本部に届いた数。運搬量 1 で不足を優先し、止まった建物を届け先に選んでいたときは 17 個（止まった建物は 8）、運搬の見直しで 72 個（6）、石炭を燃料にして 86 個（5）
       expect(got).toBeGreaterThanOrEqual(60);
       expect(full()).toBeLessThanOrEqual(7);
     } finally {

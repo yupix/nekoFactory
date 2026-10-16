@@ -104,10 +104,10 @@ export interface Recipe {
 /** 生産のレシピ。建物ごとの並び順が「自動」で試す順 */
 export const RECIPES: Record<RecipeId, Recipe> = {
   ore: { b: 'miner', in: {}, out: null, n: 1, time: 2 },
-  ironPlate: { b: 'furnace', in: { ironOre: 1, coal: 1 }, out: 'ironPlate', n: 1, time: 3 },
-  copperPlate: { b: 'furnace', in: { copperOre: 1, coal: 1 }, out: 'copperPlate', n: 1, time: 3 },
+  ironPlate: { b: 'furnace', in: { ironOre: 1 }, out: 'ironPlate', n: 1, time: 3 },
+  copperPlate: { b: 'furnace', in: { copperOre: 1 }, out: 'copperPlate', n: 1, time: 3 },
   brick: { b: 'furnace', in: { stone: 2 }, out: 'brick', n: 1, time: 2 },
-  steel: { b: 'furnace', in: { ironPlate: 5, coal: 1 }, out: 'steel', n: 1, time: 8, unlock: 'steel' },
+  steel: { b: 'furnace', in: { ironPlate: 5 }, out: 'steel', n: 1, time: 8, unlock: 'steel' },
   gear: { b: 'assembler', in: { ironPlate: 2 }, out: 'gear', n: 1, time: 2 },
   wire: { b: 'assembler', in: { copperPlate: 1 }, out: 'wire', n: 2, time: 1 },
   circuit: { b: 'assembler', in: { ironPlate: 1, wire: 3 }, out: 'circuit', n: 1, time: 4 },
@@ -124,6 +124,8 @@ export const RECIPE_IDS = Object.keys(RECIPES) as RecipeId[];
 /** 建物ごとのレシピ（RECIPES の並び順） */
 export const RECIPES_OF = {} as Partial<Record<BuildingType, RecipeId[]>>;
 for (const id of RECIPE_IDS) (RECIPES_OF[RECIPES[id].b] ??= []).push(id);
+/** 燃料: 燃やす品、1 個で進む生産の秒数（生産が進んでいる間だけ減る）、燃料を使う建物（どのレシピにも要る） */
+export const FUEL = { item: 'coal' as ItemId, burn: 24, users: ['furnace'] as BuildingType[] };
 /** 設置時と情報カードでレシピを選べる建物 */
 export const MULTI_RECIPE: BuildingType[] = ['furnace', 'assembler'];
 
