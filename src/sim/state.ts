@@ -611,6 +611,8 @@ export function setRecipe(s: GameState, id: number, recipe: RecipeId | null): st
   b.recipe = recipe;
   // 新しいレシピで使わない入力は本部へ戻す（止めている建物は全部）
   for (const i of Object.keys(b.input) as ItemId[]) if (!accepts(s, b, i)) b.input[i] = (b.input[i] ?? 0) - toStore(s, i, b.input[i] ?? 0);
+  // 出力には 1 種類しか置けないので、新しいレシピで作らない品が出力に残っていれば本部へ戻す（残ると運び出されるまで作れない）
+  if (b.out && b.output > 0 && !recipesOf(s, b).some((id) => (RECIPES[id].out ?? b.out) === b.out)) b.output -= toStore(s, b.out, b.output);
   s.rev++;
   return null;
 }

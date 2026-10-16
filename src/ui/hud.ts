@@ -616,6 +616,9 @@ export function createHud(h: HudHandlers) {
     if (cardKey(s, b, supplied) !== infoKey) return openInfo(b, s);
     const producer = !!RECIPES_OF[b.type];
     const full = outputFull(s, b);
+    // 出力に別の品が残っていて、材料の揃ったレシピに進めない（容量ではなく品の違いで止まっている）
+    const mixed =
+      full && !!b.out && b.output < bufferCap(b) && !recipesOf(s, b).some((id) => (RECIPES[id].out ?? b.out) === b.out && (Object.keys(RECIPES[id].in) as ItemId[]).every((i) => (b.input[i] ?? 0) >= RECIPES[id].in[i]!));
     const waiting = (producer || b.type === 'lab') && !b.off && !b.running && !full && !hasInputs(s, b);
     const none = waiting && producer ? missingSources(s, b, supplied) : [];
     const fac = FACILITY[b.type];
@@ -655,7 +658,9 @@ export function createHud(h: HudHandlers) {
                       ? ['研究中', 'ok']
                       : ['パック待ち', 'wait']
                     : full
-                      ? ['出力が満杯', 'full']
+                      ? mixed
+                        ? ['出力待ち', 'wait']
+                        : ['出力が満杯', 'full']
                       : none.length
                         ? ['材料なし', 'full']
                         : waiting
@@ -727,7 +732,9 @@ export function createHud(h: HudHandlers) {
           : b.type === 'hq'
             ? `次の襲撃まで ${clock(s.raid.next)}。届け先のない品はここへ運ばれ、確保数を超える分は必要な機械へ配られます`
             : full
-              ? `出力がいっぱい。${outputStatus(s, b)}`
+              ? mixed
+                ? `出力の${ITEMS[b.out!].name}を運び出すまで、ほかの品は作れません（出力には 1 種類しか置けません）。${outputStatus(s, b)}`
+                : `出力がいっぱい。${outputStatus(s, b)}`
               : none.length
                 ? none.map(sourceHint).join('。')
                 : need

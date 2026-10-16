@@ -272,16 +272,22 @@ export function haulStatus(s: GameState, b: Building, items: ItemId[]): HaulRow[
 }
 
 /**
- * 出力が満杯で止まっている建物の、出力が運び出されない理由。受け取れる建物か本部に空きがあり道が通じていれば運び手待ち、
- * 本部まで道が通じていて満杯なら倉庫がいっぱい、本部まで道が通じていなければ道がない
+ * 出力が満杯で止まっている建物の、出力が運び出されない理由。受け取れる建物か本部に空きがあり道が通じていれば運び手待ち
+ * （運び手がいない・みんな手がふさがっているならそう言う）、本部まで道が通じていて満杯なら倉庫がいっぱい、本部まで道が通じていなければ道がない
  */
 export function outputStatus(s: GameState, b: Building): string {
   const item = b.out;
   const from = reach(s, b);
   const hq = s.buildings.find((x) => x.type === 'hq');
+  const carriers = s.cats.filter((c) => !c.job && !c.away);
+  const waiting = !carriers.length
+    ? '運び手がいません。猫を雇うか、職人を運び屋に戻そう'
+    : !carriers.some(isFreeCarrier)
+      ? `運び手（${carriers.length} 匹）がみんなほかの運搬か休憩中です。猫を雇うと早く運ばれます`
+      : '運び手を待っています';
   if (item)
     for (const d of s.buildings)
-      if (d !== b && d.type !== 'hq' && !isBroken(d) && accepts(s, d, item) && inputSpace(s, d, item) > 0 && from.dist(d.x, d.y) >= 0) return '運び手を待っています';
+      if (d !== b && d.type !== 'hq' && !isBroken(d) && accepts(s, d, item) && inputSpace(s, d, item) > 0 && from.dist(d.x, d.y) >= 0) return waiting;
   if (!hq || from.dist(hq.x, hq.y) < 0) return '道が通じていません';
-  return item && inputSpace(s, hq, item) > 0 ? '運び手を待っています' : '倉庫がいっぱいです';
+  return item && inputSpace(s, hq, item) > 0 ? waiting : '倉庫がいっぱいです';
 }

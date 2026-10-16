@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ITEM_IDS } from './data';
 import { parseSave } from './save';
 import { outputStatus } from './haul';
-import { accepts, assignCat, buyResearch, cancelHand, handPlan, initialState, launchRobot, missingSources, placeBuilding, placeLift, queueHand, removeBuilding, setOff, setRecipe, sourceHint, stock, storeCap, suppliedItems, type GameState } from './state';
+import { accepts, assignCat, buyResearch, cancelHand, handPlan, hireCat, initialState, launchRobot, missingSources, placeBuilding, placeLift, queueHand, removeBuilding, setOff, setRecipe, sourceHint, stock, storeCap, suppliedItems, type GameState } from './state';
 import { tick } from './tick';
 import userSave from './fixtures/user-save-iron-to-hq.json?raw';
 
@@ -401,6 +401,23 @@ describe('供給と運搬の規則', () => {
     expect(stock(s, 'gear') + asm.output + (asm.input.ironPlate ?? 0) / 2).toBe(10);
   });
 
+  it('レシピを変えて、出力に残った品が新しいレシピでは作れないなら本部へ戻し、すぐ作り始める', () => {
+    const s = bare(false);
+    placeBuilding(s, 'assembler', 0, 0);
+    const asm = s.buildings[0];
+    s.store = {};
+    // 自動で作った歯車が出力に 2 個。回路基板の材料は揃っている
+    Object.assign(asm, { output: 2, out: 'gear', input: { ironPlate: 1, wire: 3 } });
+    setRecipe(s, asm.id, 'circuit');
+    expect(asm.output).toBe(0);
+    expect(stock(s, 'gear')).toBe(2);
+    run(s, 4);
+    expect(asm).toMatchObject({ output: 1, out: 'circuit' });
+    // 同じ品を作るレシピ・自動に変えたときは出力に残す
+    setRecipe(s, asm.id, null);
+    expect(asm.output).toBe(1);
+  });
+
   it('レシピを変えると、新しいレシピで使わない入力だけ本部へ戻す（本部が満杯なら入るだけ）', () => {
     const s = bare(false);
     placeBuilding(s, 'furnace', 0, 0, 'copperPlate');
@@ -600,7 +617,13 @@ describe('本部の手作業', () => {
     s.store.gear = 1000;
     placeBuilding(s, 'miner', 2, 0);
     const m = s.buildings[1];
+    expect(outputStatus(s, m)).toBe('運び手がいません。猫を雇うか、職人を運び屋に戻そう');
+    hireCat(s);
     expect(outputStatus(s, m)).toBe('運び手を待っています');
+    // 運び手がみんな手がふさがっていれば、猫を増やす案内
+    s.cats[0].rest = 'sleep';
+    expect(outputStatus(s, m)).toBe('運び手（1 匹）がみんなほかの運搬か休憩中です。猫を雇うと早く運ばれます');
+    s.cats[0].rest = null;
     s.store.ironOre = storeCap(s);
     expect(outputStatus(s, m)).toBe('倉庫がいっぱいです');
     for (const [x, y] of [[1, 0], [3, 0], [2, 1], [2, -1]]) placeBuilding(s, 'fence', x, y);
