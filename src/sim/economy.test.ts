@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { FUEL, ITEM_IDS, SQUEEZE, type ItemId } from './data';
+import { FUEL, ITEM_IDS, KEEP_ITEMS, SQUEEZE, type ItemId } from './data';
 import { parseSave } from './save';
 import { outputStatus } from './haul';
 import { bfs, occupancy } from './path';
-import { accepts, assignCat, buyResearch, cancelHand, fuelOut, handPlan, hireCat, initialState, launchRobot, missingSources, placeBuilding, placeLift, queueHand, removeBuilding, setOff, setRecipe, sourceHint, stock, storeCap, suppliedItems, gridSize, type GameState } from './state';
+import { accepts, assignCat, buyResearch, cancelHand, fuelOut, handPlan, hireCat, initialState, keepOf, launchRobot, missingSources, placeBuilding, placeLift, queueHand, removeBuilding, setOff, setRecipe, sourceHint, stock, storeCap, suppliedItems, gridSize, type GameState } from './state';
 import { hasInputs, tick } from './tick';
 import userSave from './fixtures/user-save-iron-to-hq.json?raw';
 
@@ -483,6 +483,29 @@ describe('供給と運搬の規則', () => {
     expect(stock(s, 'gear') + asm.output + (asm.input.ironPlate ?? 0) / 2).toBe(10);
   });
 
+  it('確保数の既定は建設資材（建物とリフトの cost に出てくる品）が 10、ほかは 0。keep に入れた値はそのまま', () => {
+    const s = initialState(4);
+    expect(KEEP_ITEMS).toEqual(['stone', 'ironPlate', 'brick', 'gear', 'wire', 'circuit', 'steel']);
+    for (const id of ['ironPlate', 'gear', 'stone', 'brick', 'wire', 'circuit', 'steel'] as ItemId[]) expect(keepOf(s, id)).toBe(10);
+    for (const id of ['ironOre', 'coal', 'fish', 'can', 'bullet', 'redPack'] as ItemId[]) expect(keepOf(s, id)).toBe(0);
+    s.keep = { gear: 30, ironOre: 5, ironPlate: 0 };
+    expect([keepOf(s, 'gear'), keepOf(s, 'ironOre'), keepOf(s, 'ironPlate')]).toEqual([30, 5, 0]);
+  });
+
+  it('鉄鉱石の確保数は既定 0 なので、本部の 5 個は全部炉へ運ぶ', () => {
+    const s = initialState(4);
+    s.raid.next = 1e9;
+    s.cats.length = 1;
+    s.ores = [];
+    placeBuilding(s, 'furnace', 3, 0, 'ironPlate');
+    const furnace = s.buildings[1];
+    s.store = { ironOre: 5 };
+    // 燃料がないので炉は作らず、届いた鉄鉱石は入力に残る
+    run(s, 60);
+    expect(stock(s, 'ironOre')).toBe(0);
+    expect(furnace.input.ironOre).toBe(5);
+  });
+
   it('レシピを変えて、出力に残った品が新しいレシピでは作れないなら本部へ戻し、すぐ作り始める', () => {
     const s = bare(false);
     placeBuilding(s, 'assembler', 0, 0);
@@ -564,7 +587,8 @@ describe('供給と運搬の規則', () => {
     expect(missingSources(s, asm)).toEqual(['copperPlate']);
     s.store.coal = 11;
     expect(missingSources(s, furnace)).toEqual(['copperOre']);
-    // 本部の在庫は確保数（10）を超える分だけ数える
+    // 本部の在庫は確保数を超える分だけ数える（鉱石の既定は 0 なので、確保数 10 を入れて確かめる）
+    s.keep.copperOre = 10;
     s.store.copperOre = 10;
     expect(missingSources(s, furnace)).toEqual(['copperOre']);
     s.store.copperOre = 11;

@@ -8,8 +8,8 @@ const setText = (e: Element, t: string) => {
   if (e.textContent !== t) e.textContent = t;
 };
 
-/** 確保数の入力（本部から機械へ出さずに残す数） */
-const resHtml = `<span class="st-res" title="この数は機械へ出さずに本部に残す（建設用）"><small>確保</small><input type="number" min="0" step="10" inputmode="numeric" value="10"></span>`;
+/** 確保数の入力（本部に残す数。下回っている間は建物の出力をまず本部へ運ぶ） */
+const resHtml = `<span class="st-res" title="本部に残す数。これを下回っていれば、建物の出力はまず本部へ運ばれ、超えた分を必要な機械へ配ります"><small>確保</small><input type="number" min="0" step="10" inputmode="numeric" value="10"></span>`;
 
 /** 手作業の候補の行（材料・個数・秒と、まとめて足すボタン） */
 const ADD = [1, 5, 10];
@@ -165,7 +165,7 @@ export function createStorePanel(o: {
     const wh = buildingCount(s, 'warehouse');
     setText(cap, `容量 各 ${fmt(c)}${wh ? `（倉庫 ${wh} 棟）` : ''}`);
     const markets = buildingCount(s, 'market');
-    setText(note, `「確保」の数は機械へ出さずに残し、超えた分を必要な機械へ配ります。${markets ? `市場 ${markets} 棟が「売る」品を残す量より多い分から売ります` : '市場がないので、「売る」にしても売れません。市場を建てましょう'}`);
+    setText(note, `「確保」は本部に残す数。これを下回っていれば、建物の出力はまず本部へ運ばれ、超えた分を必要な機械へ配ります。${markets ? `市場 ${markets} 棟が「売る」品を残す量より多い分から売ります` : '市場がないので、「売る」にしても売れません。市場を建てましょう'}`);
     for (const [id, r] of rows) {
       const n = stock(s, id);
       r.bar.style.width = `${Math.min(100, (n / c) * 100)}%`;

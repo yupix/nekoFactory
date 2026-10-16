@@ -149,13 +149,15 @@ export const HAND: Record<HandId, { in: Cost; n: number; time: number; unlock?: 
 export const HAND_IDS = Object.keys(HAND) as HandId[];
 /** 手作業のキューの件数の上限 */
 export const HAND_QUEUE = 10;
-/** 弾薬と研究パック: 本部の確保数の既定が 0 で、本部から配る仕事も後回しにしない（建設資材ではないため） */
+/** 弾薬と研究パック: 本部から配る仕事も後回しにしない（建設資材ではないため） */
 export const SUPPLY: ItemId[] = ['bullet', 'shell', 'redPack', 'greenPack', 'bluePack'];
-/** 本部から機械へ出さずに残す数（確保数）の既定 */
+/** 建設資材（KEEP_ITEMS）の確保数の既定。本部はこの数まで建物の出力を先に受け取り、超える分を機械へ出す */
 export const KEEP = 10;
 
 /** リフト: 1 タイルの建設資材、フックの数、ティア 1 の速さ（タイル/秒）、建物から積む間隔（秒） */
 export const LIFT = { cost: { ironPlate: 1, gear: 1 } as Cost, hooks: 4, speed: 1, load: 0.5 };
+/** 建設資材（建物とリフトの cost に出てくる品）。確保数の既定は KEEP、ほかの品は 0 */
+export const KEEP_ITEMS: ItemId[] = ITEM_IDS.filter((id) => [...Object.values(BUILDINGS), LIFT].some((b) => b.cost[id]));
 
 /** ロボ猫: 速さ（猫に対する倍率）、運搬量の上乗せ、バッテリーが 1 減るまでの運搬秒数、充電に向かう残量、スタンドの定員と満充電の秒数、本部での充電秒数 */
 export const ROBOT = { speed: 1.5, carry: 2, drain: 120, low: 0.2, cap: 2, charge: 10, hqCharge: 30 };

@@ -1,4 +1,4 @@
-import { AMMO_CAP, BUFFER_CAP, BUILDINGS, CAT_COLORS, CAT_NAMES, DEPOSIT, FACILITY, FUEL, GOOD_BONUS, GRID, HAND, HAND_QUEUE, INFINITE, ITEM_IDS, ITEMS, KEEP, LIFT, MULTI_RECIPE, ORES, RAID, RECIPE_IDS, RECIPES, RECIPES_OF, RESEARCH, ROBOT, RUNAWAY, START_STORE, STAT_IDS, STATS, SQUEEZE, STORE, SUPPLY, TEMPERS, WEAPONS, WORK_STAT, type BuildingType, type CatColor, type Cost, type DogKind, type HandId, type InfiniteId, type ItemId, type OreId, type RecipeId, type ResearchId, type StatId, type Temper } from './data';
+import { AMMO_CAP, BUFFER_CAP, BUILDINGS, CAT_COLORS, CAT_NAMES, DEPOSIT, FACILITY, FUEL, GOOD_BONUS, GRID, HAND, HAND_QUEUE, INFINITE, ITEM_IDS, ITEMS, KEEP, KEEP_ITEMS, LIFT, MULTI_RECIPE, ORES, RAID, RECIPE_IDS, RECIPES, RECIPES_OF, RESEARCH, ROBOT, RUNAWAY, START_STORE, STAT_IDS, STATS, SQUEEZE, STORE, TEMPERS, WEAPONS, WORK_STAT, type BuildingType, type CatColor, type Cost, type DogKind, type HandId, type InfiniteId, type ItemId, type OreId, type RecipeId, type ResearchId, type StatId, type Temper } from './data';
 import { bfs, occupancy } from './path';
 
 export interface Building {
@@ -263,7 +263,7 @@ export interface GameState {
   store: Partial<Record<ItemId, number>>;
   /** 市場で売る品と、残す量（この数より多い分だけ売る） */
   sell: Partial<Record<ItemId, number>>;
-  /** 本部から機械へ出さずに残す数（確保数。ない品は keepOf の既定） */
+  /** 本部の確保数（これを下回る間は建物の出力を先に本部へ運び、超える分だけ機械へ出す。ない品は keepOf の既定） */
   keep: Partial<Record<ItemId, number>>;
   ores: Ore[];
   /** 鉱床を作る乱数の種（state の seed とは別。拡張のたびに同じ種から外周を作る） */
@@ -386,8 +386,8 @@ export const gridSize = (s: GameState) => Math.min(GRID.max, GRID.base + GRID.st
 /** アイテムごとの倉庫の容量（倉庫 1 棟で +200） */
 export const storeCap = (s: GameState) => STORE.base + STORE.per * buildingCount(s, 'warehouse');
 export const stock = (s: GameState, id: ItemId) => s.store[id] ?? 0;
-/** 本部の確保数（弾薬・研究パックは既定 0、ほかは 10） */
-export const keepOf = (s: GameState, id: ItemId) => s.keep[id] ?? (SUPPLY.includes(id) ? 0 : KEEP);
+/** 本部の確保数（建設資材は既定 10、ほかは 0） */
+export const keepOf = (s: GameState, id: ItemId) => s.keep[id] ?? (KEEP_ITEMS.includes(id) ? KEEP : 0);
 /** 資材の不足分（足りていれば空） */
 export function missing(s: GameState, cost: Cost, mult = 1): Cost {
   const out: Cost = {};

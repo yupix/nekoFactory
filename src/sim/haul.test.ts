@@ -215,7 +215,7 @@ describe('運搬の割当（需要優先）', () => {
         tick(s, DT);
         ITEM_IDS.forEach((id, k) => (got += Math.max(0, stock(s, id) - before[k])));
       }
-      // 10 分で本部に届いた数。運搬量 1 で不足を優先し、止まった建物を届け先に選んでいたときは 17 個（止まった建物は 8）、運搬の見直しで 72 個（6）、石炭を燃料にして 86 個（5）
+      // 10 分で本部に届いた数。運搬量 1 で不足を優先し、止まった建物を届け先に選んでいたときは 17 個（止まった建物は 8）、運搬の見直しで 72 個（6）、石炭を燃料にして 86 個（5）、確保数を下回る間は建物の出力を先に本部へ運んで 90 個（7）
       expect(got).toBeGreaterThanOrEqual(60);
       expect(full()).toBeLessThanOrEqual(7);
     } finally {
@@ -231,6 +231,8 @@ describe('運搬の割当（需要優先）', () => {
     expect(placeBuilding(s, 'miner', -4, 2)).toBeNull();
     expect(placeBuilding(s, 'furnace', -3, 3, 'ironPlate')).toBeNull();
     s.store = {};
+    // 鉄板の確保数で炉の出力が先に本部へ運ばれて、炉が止まっていない状態にならないように
+    s.keep.ironPlate = 0;
     const [hq, miner, furnace] = s.buildings;
     Object.assign(miner, { out: 'ironOre', output: bufferCap(miner) });
     Object.assign(furnace, { out: 'ironPlate', output: bufferCap(furnace), input: { coal: bufferCap(furnace) } });
@@ -296,6 +298,88 @@ describe('運搬の割当（需要優先）', () => {
     hireCat(s);
     expect(row('ironOre')?.reason).toBe('割り当て待ち');
     expect(hq.type).toBe('hq');
+  });
+});
+
+describe('本部の確保数', () => {
+  /** 出力に歯車 10 個の組立機と、隣の歯車が飢えた赤パックの組立機（本部から遠い）。猫 cats 匹は本部に、本部の歯車は gear 個 */
+  function gearLine(gear: number, cats = 1) {
+    const s = initialState(4);
+    s.raid.next = 1e9;
+    s.ores = [];
+    s.store = { ironPlate: 100, gear: 100 };
+    expect(placeBuilding(s, 'assembler', 9, 6, 'gear')).toBeNull();
+    expect(placeBuilding(s, 'assembler', 10, 6, 'redPack')).toBeNull();
+    s.store = { gear };
+    s.cats.length = cats;
+    const [hq, gearAsm, red] = s.buildings;
+    Object.assign(gearAsm, { out: 'gear', output: 10 });
+    red.input = { copperPlate: 10 };
+    return { s, hq, gearAsm, red };
+  }
+  const assign = (s: GameState) => assignJobs(s, new Ctx(s), DT, []);
+
+  it('本部の歯車が確保数を下回っていれば、飢えた組立機より先に歯車を本部へ運ぶ', () => {
+    const { s, hq, gearAsm } = gearLine(0);
+    expect(keepOf(s, 'gear')).toBe(10);
+    assign(s);
+    expect(s.cats[0]).toMatchObject({ state: 'toSource', src: gearAsm.id, dst: hq.id, item: 'gear' });
+  });
+
+  it('本部の歯車 + 運搬予定が確保数に届いたら、組立機へ運ぶ', () => {
+    // 8 個なら本部へ
+    let g = gearLine(8);
+    assign(g.s);
+    expect(g.s.cats[0].dst).toBe(g.hq.id);
+    // 8 個と、本部へ運んでいる 2 個で 10 個
+    g = gearLine(8, 2);
+    Object.assign(g.s.cats[0], { state: 'toDest', item: 'gear', amount: 2, src: g.gearAsm.id, dst: g.hq.id });
+    assign(g.s);
+    expect(g.s.cats[1]).toMatchObject({ state: 'toSource', src: g.gearAsm.id, dst: g.red.id, item: 'gear' });
+    // 10 個あれば組立機へ
+    g = gearLine(10);
+    assign(g.s);
+    expect(g.s.cats[0].dst).toBe(g.red.id);
+  });
+
+  it('確保数を 0 にすると、最初から組立機へ運ぶ', () => {
+    const { s, red } = gearLine(0);
+    s.keep.gear = 0;
+    assign(s);
+    expect(s.cats[0].dst).toBe(red.id);
+  });
+
+  it('猫 1 匹で、本部の歯車が確保数に届くまで本部へ運び、その後は組立機へ運ぶ', () => {
+    const { s, hq, gearAsm, red } = gearLine(0);
+    const saved = { ...simOptions };
+    simOptions.runaway = 0;
+    const jobs: { dst: number; stock: number }[] = [];
+    try {
+      for (let i = 0; i < 3000 && !jobs.some((j) => j.dst === red.id); i++) {
+        gearAsm.output = 10;
+        const idle = s.cats[0].state === 'idle';
+        const stockBefore = stock(s, 'gear');
+        tick(s, DT);
+        if (idle && s.cats[0].state !== 'idle') jobs.push({ dst: s.cats[0].dst, stock: stockBefore });
+      }
+    } finally {
+      Object.assign(simOptions, saved);
+    }
+    // 運搬量 2 で 5 回本部へ運び（0 → 10）、6 回目に組立機へ
+    expect(jobs.map((j) => j.dst)).toEqual([hq.id, hq.id, hq.id, hq.id, hq.id, red.id]);
+    expect(jobs[5].stock).toBeGreaterThanOrEqual(10);
+  });
+
+  it('材料待ちの行の理由は「本部の確保数を満たすのが優先」', () => {
+    const { s, red } = gearLine(0);
+    const row = () => haulStatus(s, red, ['gear'])[0];
+    expect(row()).toEqual({ item: 'gear', where: ['組立機 (9, 6) の出力に 10'], reason: '本部の確保数（10）を満たすのが優先' });
+    // 猫が本部へ運んでいる間も（0 + 2 < 10）
+    assign(s);
+    expect(row().reason).toBe('本部の確保数（10）を満たすのが優先');
+    // 確保数を 0 にすれば、ほかの理由
+    s.keep.gear = 0;
+    expect(row().reason).toBe('別の建物が優先');
   });
 });
 

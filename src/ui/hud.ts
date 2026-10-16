@@ -749,7 +749,7 @@ export function createHud(h: HudHandlers) {
           : w
           ? `射程 ${weaponRange(b)}・ダメージ ${Math.round(weaponDamage(s, b))}。${empty ? `${ITEMS[w.ammo!].name}を運んでもらうと撃てます（組立機で作るか、本部の在庫から配られます）` : '射程内で本部に一番近い犬を狙います'}`
           : b.type === 'hq'
-            ? `次の襲撃まで ${clock(s.raid.next)}。届け先のない品はここへ運ばれ、確保数を超える分は必要な機械へ配られます`
+            ? `次の襲撃まで ${clock(s.raid.next)}。届け先のない品はここへ運ばれます。確保数を下回る品は優先してここへ運ばれ、超える分は必要な機械へ配られます`
             : full
               ? mixed
                 ? `出力の${ITEMS[b.out!].name}を運び出すまで、ほかの品は作れません（出力には 1 種類しか置けません）。${outputStatus(s, b)}`

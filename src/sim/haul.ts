@@ -4,15 +4,16 @@ import { accepts, bufferCap, carryOf, gridSize, hireCost, inputSpace, isBroken, 
 import { outputFull, simOptions, type Ctx, type GameEvent } from './tick';
 
 /**
- * 運搬の割当（需要優先）。毎 tick、需要（入力が足りない建物）と供給（建物の出力・確保数を超える本部の在庫）を集め、
+ * 運搬の割当（需要優先）。毎 tick、需要（入力が足りない建物、確保数を下回った本部）と供給（建物の出力・確保数を超える本部の在庫）を集め、
  * 優先度の段階で「出荷元 → 届け先」の組を作る。距離は同じ段階の中でだけ比べる:
- *   1 飢えた建物 ← 出力が満杯で止まっている出荷元 / 2 飢えた建物 ← その他の出荷元（本部を含む）/
- *   3 満杯で止まっている出荷元 → 受け取れる建物（なければ本部）/ 4 不足した建物 ← 出荷元 / 5 その他の出荷元 → 3 と同じ /
- *   6 本部 → 入力に空きのある建物（補充）
- * 3・5 段の届け先には、出力が満杯で止まっている建物は選ばない（本部にも届かないときの最後の手段だけ）。止まった建物の出力が別の止まった建物に詰め込まれず本部へ行くように。
- * 止まった出荷元（3 段）は不足（4 段）より先に拾う（運搬量の 1 回分を届けるたびに不足が再発して、止まった建物がいつまでも後回しにならないように）。
+ *   1 確保数を下回った本部 ← 建物の出力 / 2 飢えた建物 ← 出力が満杯で止まっている出荷元 / 3 飢えた建物 ← その他の出荷元（本部を含む）/
+ *   4 満杯で止まっている出荷元 → 受け取れる建物（なければ本部）/ 5 不足した建物 ← 出荷元 / 6 その他の出荷元 → 4 と同じ /
+ *   7 本部 → 入力に空きのある建物（補充）
+ * 1 段は建設資材が下流の機械に全部吸われて本部に貯まらないように（本部の在庫 + 運搬予定が確保数に届けば、その品は機械へ流れる）。
+ * 4・6 段の届け先には、出力が満杯で止まっている建物は選ばない（本部にも届かないときの最後の手段だけ）。止まった建物の出力が別の止まった建物に詰め込まれず本部へ行くように。
+ * 止まった出荷元（4 段）は不足（5 段）より先に拾う（運搬量の 1 回分を届けるたびに不足が再発して、止まった建物がいつまでも後回しにならないように）。
  * 段階の高い組から順に、その組の出荷元に一番近い待機中の猫を割り当てる。1 つの組には 1 tick に 1 匹まで。
- * 3 段だけは、満杯で止まってから（最後に拾われてから）長い出荷元から拾う（補充の速い近くの採掘機がいつも勝って、遠くの止まった建物が拾われ続けないように）
+ * 4 段だけは、満杯で止まってから（最後に拾われてから）長い出荷元から拾う（補充の速い近くの採掘機がいつも勝って、遠くの止まった建物が拾われ続けないように）
  * 割当の後、待機猫が残らず満杯で止まった出荷元が届け先つきで残る時間を数え、30 秒ぶんで「猫を雇おう」のヒント（hireTip）を出す
  */
 
@@ -40,26 +41,26 @@ const available = (s: GameState, src: Building, item: ItemId) => (src.type === '
 /** 出力が満杯で止まっている */
 const isFull = (s: GameState, b: Building) => b.type !== 'hq' && (b.output >= bufferCap(b) || outputFull(s, b));
 /** 割当の段階（bucket の添字。小さいほど先） */
-const P = { starvedFull: 1, starved: 2, stalled: 3, short: 4, surplus: 5, refill: 6 } as const;
-/** 需要の組の段階（0 は組にしない） */
+const P = { reserve: 1, starvedFull: 2, starved: 3, stalled: 4, short: 5, surplus: 6, refill: 7 } as const;
+/** 建物を届け先にする需要の組の段階（0 は組にしない。本部を届け先にする組は P.reserve） */
 const demandP = (s: GameState, src: Building, level: number) => (level === 0 ? (isFull(s, src) ? P.starvedFull : P.starved) : level === 1 ? P.short : src.type === 'hq' ? P.refill : 0);
 
 interface Pair {
   p: number;
   src: Building;
   item: ItemId;
-  /** 届け先（3・5 段は割り当てるときに選び直す） */
+  /** 届け先（4・6 段は割り当てるときに選び直す） */
   dst: Building;
   /** 同じ段の中で比べる距離（一番近い待機猫 → 出荷元 → 届け先） */
   dist: number;
   /** 本部から出す（同じ段では建物の出力の後） */
   late: boolean;
-  /** 3 段: 出荷元が満杯で止まった回（古いほど先） */
+  /** 4 段: 出荷元が満杯で止まった回（古いほど先） */
   since: number;
 }
 
 /**
- * 3・5 段の届け先: 出荷元から一番近い、受け取れる建物（出力が満杯で止まっている建物を除く）。なければ本部。
+ * 4・6 段の届け先: 出荷元から一番近い、受け取れる建物（出力が満杯で止まっている建物を除く）。なければ本部。
  * 本部にも届かない・空きがなければ、一番近い止まっている建物（最後の手段。満杯の出荷元がいつまでも拾われないことはないように）
  */
 function receiver(s: GameState, ctx: Ctx, src: Building, item: ItemId, from: Bfs) {
@@ -152,15 +153,26 @@ function assignFree(s: GameState, ctx: Ctx, free: Cat[]) {
     } else if (src.out && src.output > 0) (supply[src.out] ??= []).push(src);
   }
 
-  const buckets: Pair[][] = [[], [], [], [], [], [], []];
+  const buckets: Pair[][] = [[], [], [], [], [], [], [], []];
   for (const item of Object.keys(supply) as ItemId[]) {
     const srcs = supply[item]!.filter((src) => catDist(src) < Infinity);
     if (!srcs.length) continue;
     // 需要（品ごとの届け先 × 出荷元）
     for (const d of ctx.L.dsts[item]!) {
-      if (d.type === 'hq' || isBroken(d)) continue;
+      if (isBroken(d)) continue;
       const r = room(s, ctx, d, item);
       if (r.have >= r.cap) continue;
+      if (d.type === 'hq') {
+        // 本部は在庫 + 運搬予定が確保数を下回っている間だけ、建物の出力を最優先で受け取る
+        if (r.have >= keepOf(s, item)) continue;
+        for (const src of srcs) {
+          if (src.type === 'hq') continue;
+          const dd = ctx.fromBuilding(src).dist(d.x, d.y);
+          if (dd < 0) continue;
+          buckets[P.reserve].push({ p: P.reserve, src, item, dst: d, dist: catDist(src) + dd, late: false, since: 0 });
+        }
+        continue;
+      }
       // 出力が満杯で止まっている建物は材料ではなく出力の空きを待っているので、需要は「足りている」扱い
       const level = isFull(s, d) ? 2 : levelOf(r.have, needOf(s, d, item));
       for (const src of srcs) {
@@ -200,7 +212,10 @@ function assignFree(s: GameState, ctx: Ctx, free: Cat[]) {
       }
       const r = room(s, ctx, dst, item);
       if (r.have >= r.cap) continue;
-      if (!supplyPair) {
+      if (p === P.reserve) {
+        // 先の割当で本部の確保数が満たされたら捨てる（その出荷元の 4・6 段の組は別に積んである）
+        if (r.have >= keepOf(s, item)) continue;
+      } else if (!supplyPair) {
         // 先の割当で需要が満たされてきたら、その段階の組として後ろへ回す
         const level = isFull(s, dst) ? 2 : levelOf(r.have, needOf(s, dst, item));
         const now = demandP(s, src, level);
@@ -271,7 +286,7 @@ export interface HaulRow {
 
 /**
  * 建物が待っている材料（入力が 1 回分に足りない品）ごとの、品の所在と運ばれない理由。
- * 理由: 猫が運んでいる / 予約済み（ほかへ運ぶ途中）/ 本部の在庫が確保数以下 / 道が通じていない / 運び手がいない / 別の建物が優先 / 割り当て待ち
+ * 理由: 猫が運んでいる / 本部の確保数を満たすのが優先 / 予約済み（ほかへ運ぶ途中）/ 本部の在庫が確保数以下 / 道が通じていない / 運び手がいない / 別の建物が優先 / 割り当て待ち
  */
 export function haulStatus(s: GameState, b: Building, items: ItemId[]): HaulRow[] {
   const rows: HaulRow[] = [];
@@ -299,21 +314,26 @@ export function haulStatus(s: GameState, b: Building, items: ItemId[]): HaulRow[
       }
     }
     const reserved = s.cats.some((c) => c.state === 'toSource' && c.item === item && c.dst !== b.id);
+    // 建物の出力は、本部の在庫 + 本部への運搬予定が確保数に届くまで本部へ運ばれる
+    const toHq = hq ? s.cats.reduce((a, c) => a + (c.state !== 'idle' && c.dst === hq.id && c.item === item ? c.amount : 0), 0) : 0;
+    const reserve = hq && outs.length > 0 && n + toHq < keepOf(s, item);
     const reason = coming
       ? `猫が運んでいる（${coming} 個）`
-      : !any
-        ? reserved
-          ? '予約済み（ほかの建物へ運ぶ途中）'
-          : hq && n > 0
-            ? '本部の在庫が確保数以下'
-            : null
-        : !reachable
-          ? '道が通じていない'
-          : !carriers.length
-            ? '運び手がいない'
-            : !carriers.some(isFreeCarrier)
-              ? '別の建物が優先'
-              : '割り当て待ち';
+      : reserve
+        ? `本部の確保数（${keepOf(s, item)}）を満たすのが優先`
+        : !any
+          ? reserved
+            ? '予約済み（ほかの建物へ運ぶ途中）'
+            : hq && n > 0
+              ? '本部の在庫が確保数以下'
+              : null
+          : !reachable
+            ? '道が通じていない'
+            : !carriers.length
+              ? '運び手がいない'
+              : !carriers.some(isFreeCarrier)
+                ? '別の建物が優先'
+                : '割り当て待ち';
     if (where.length || reason) rows.push({ item, where, reason });
   }
   return rows;
