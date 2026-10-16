@@ -92,6 +92,8 @@ export function parseSave(json: string | null, now: number): { state: GameState;
     // 本部の手作業も後から足した
     d.state.hand ??= newHand();
     d.state.craftTip ??= false;
+    // 運び手不足のヒントも後から足した
+    d.state.hireTip ??= { lag: 0, cd: 0 };
     return { state: d.state, savedAt: Number(d.savedAt) || now, from: d.version };
   } catch {
     return null;

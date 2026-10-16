@@ -10,10 +10,11 @@ import { accepts, addStore, bufferCap, catSpeedOf, endRest, facilityCap, facilit
  * 市場への納品と研究所の消費（浮遊テキスト用）、猫のステータスの Lv UP（cat と stat 付き）、襲撃の出来事。
  * wave: 襲撃の開始（amount はウェーブ）/ bone: 犬が倒れた（dog、amount はコイン）/ clear・retreat・lost: 決着（clear は報酬コイン、lost は失ったコイン）/
  * broken: 建物の故障 / fire: 発射（amount は狙った犬）/ hit: 着弾（type は兵器）/ tip: 初回襲撃の 3 分前（チュートリアル）/
- * away: 猫が家出を始めた（cat）/ gone: 家出した猫が島を去った（cat と name）/ craft: 本部の手作業が 1 回できた（item、amount は個数）
+ * away: 猫が家出を始めた（cat）/ gone: 家出した猫が島を去った（cat と name）/ craft: 本部の手作業が 1 回できた（item、amount は個数）/
+ * hireTip: 運び手不足が続いている（猫を雇おうのヒント。amount は雇用コスト）
  */
 export interface GameEvent {
-  kind: 'coin' | 'rp' | 'lvup' | 'wave' | 'bone' | 'clear' | 'retreat' | 'lost' | 'broken' | 'fire' | 'hit' | 'tip' | 'away' | 'gone' | 'craft';
+  kind: 'coin' | 'rp' | 'lvup' | 'wave' | 'bone' | 'clear' | 'retreat' | 'lost' | 'broken' | 'fire' | 'hit' | 'tip' | 'away' | 'gone' | 'craft' | 'hireTip';
   amount: number;
   x: number;
   y: number;
@@ -75,7 +76,7 @@ export function tick(s: GameState, dt: number): GameEvent[] {
   raidTick(s, ctx, dt, bonus, events);
   heal(s, dt);
   awayTick(s, ctx, dt, events);
-  assignJobs(s, ctx);
+  assignJobs(s, ctx, dt, events);
   const raid = s.raid.cur;
 
   for (const cat of s.cats) {

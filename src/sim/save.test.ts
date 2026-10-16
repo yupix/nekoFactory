@@ -142,6 +142,13 @@ describe('save', () => {
     expect(loadGame(NOW).state.cats).toHaveLength(4);
   });
 
+  it('運び手不足のヒントの記録がない保存（fixtures）は { lag: 0, cd: 0 } で読む', () => {
+    for (const raw of [ironToHq, stalledHq]) {
+      expect(JSON.parse(raw).state.hireTip).toBeUndefined();
+      expect(parseSave(raw, NOW)!.state.hireTip).toEqual({ lag: 0, cd: 0 });
+    }
+  });
+
   for (const [name, raw] of [['user-save-iron-to-hq', ironToHq], ['user-save-stalled-hq', stalledHq]] as const)
     it(`燃料のない保存（${name}）も読めて、炉が石炭を燃やして動き出す`, () => {
       const s = parseSave(raw, NOW)!.state;

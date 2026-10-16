@@ -135,7 +135,8 @@ export interface HudHandlers {
   select(m: Mode): void;
   /** 今のモード */
   mode(): Mode;
-  hire(): void;
+  /** 猫を雇う（雇えたら true） */
+  hire(): boolean;
   research(): void;
   /** 猫の一覧を開閉する */
   cats(): void;
@@ -400,7 +401,13 @@ export function createHud(h: HudHandlers) {
   catTools.appendChild(toolRow);
   bar.appendChild(catTools);
   const hire = el('button', 'slot hire', `${thumbImg('coat:brown')}<span class="name">猫を雇う</span><span class="cost coin"><i>${ICON.coin}</i><b></b></span>`);
-  hire.onclick = h.hire;
+  // 運び手不足のヒントの強調（チュートリアルの guide とは別のタイマーで外す。雇えたらすぐ外す）
+  let hireGuide = 0;
+  const unguideHire = () => {
+    clearTimeout(hireGuide);
+    hire.classList.remove('guide');
+  };
+  hire.onclick = () => h.hire() && unguideHire();
   const remove = el('button', 'slot remove', `<i class="big">${ICON.hammer}</i><span class="name">撤去</span><span class="cost sub">資材 50% 返却</span>`);
   remove.onclick = () => h.select('remove');
   toolRow.append(hire, remove);
@@ -1251,6 +1258,12 @@ export function createHud(h: HudHandlers) {
     toast,
     ask,
     flyCoins,
+    /** 雇うボタンを 8 秒強調する（付いていれば延ばす） */
+    nudgeHire() {
+      clearTimeout(hireGuide);
+      hire.classList.add('guide');
+      hireGuide = window.setTimeout(unguideHire, 8000);
+    },
     select(t: { building: Building } | { cat: Cat } | { lift: Lift } | null, s: GameState) {
       if (t && 'building' in t) openInfo(t.building, s);
       else if (t && 'lift' in t) openLift(t.lift);

@@ -149,6 +149,10 @@ function onEvent(e: GameEvent, s: GameState) {
     case 'tip':
       hud.toast('犬が来る。水鉄砲タワーを置いて守ろう', 'raid', 7000);
       return;
+    case 'hireTip':
+      if (s.coins >= e.amount) hud.toast('運び手が足りていない。猫を雇うと品物が早く運ばれる', 'info', 7000);
+      else hud.toast(`運び手が足りていない。コインが貯まったら猫を雇おう（${fmt(e.amount)} コイン）`, 'info', 7000);
+      return hud.nudgeHire();
     case 'away': {
       const pos = ents.catPosition(e.cat!);
       return audio.play('sadMeow', pos ? Math.max(0.5, falloff(pos)) : 1);
@@ -245,7 +249,11 @@ const panel = createResearchPanel({
   },
 });
 
-const hire = () => act({ kind: 'hire' }, hireCat, 'hire') && saveSoon();
+const hire = () => {
+  if (!act({ kind: 'hire' }, hireCat, 'hire')) return false;
+  saveSoon();
+  return true;
+};
 /** 建物カード・猫カード・猫一覧で共通の配属処理 */
 async function assign(c: Cat, b: Building) {
   // 最後の運び屋を職人にすると荷物が動かなくなる（ロボ猫かリフトがあれば言わない）

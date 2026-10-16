@@ -1,7 +1,7 @@
 import { BUILDINGS, ITEM_IDS, RECIPES, ROBOT, SQUEEZE, SUPPLY, type ItemId } from './data';
 import { bfs, occupancy, type Bfs } from './path';
-import { accepts, bufferCap, carryOf, gridSize, inputSpace, isBroken, keepOf, recipesOf, stock, storeCap, type Building, type Cat, type GameState } from './state';
-import { outputFull, simOptions, type Ctx } from './tick';
+import { accepts, bufferCap, carryOf, gridSize, hireCost, inputSpace, isBroken, keepOf, recipesOf, stock, storeCap, type Building, type Cat, type GameState } from './state';
+import { outputFull, simOptions, type Ctx, type GameEvent } from './tick';
 
 /**
  * 運搬の割当（需要優先）。毎 tick、需要（入力が足りない建物）と供給（建物の出力・確保数を超える本部の在庫）を集め、
@@ -13,6 +13,7 @@ import { outputFull, simOptions, type Ctx } from './tick';
  * 止まった出荷元（3 段）は不足（4 段）より先に拾う（運搬量の 1 回分を届けるたびに不足が再発して、止まった建物がいつまでも後回しにならないように）。
  * 段階の高い組から順に、その組の出荷元に一番近い待機中の猫を割り当てる。1 つの組には 1 tick に 1 匹まで。
  * 3 段だけは、満杯で止まってから（最後に拾われてから）長い出荷元から拾う（補充の速い近くの採掘機がいつも勝って、遠くの止まった建物が拾われ続けないように）
+ * 割当の後、待機猫が残らず満杯で止まった出荷元が届け先つきで残る時間を数え、30 秒ぶんで「猫を雇おう」のヒント（hireTip）を出す
  */
 
 export const inputTotal = (b: Building) => Object.values(b.input).reduce((a, n) => a + (n ?? 0), 0);
@@ -81,8 +82,33 @@ function receiver(s: GameState, ctx: Ctx, src: Building, item: ItemId, from: Bfs
   return best ?? hq ?? stalled;
 }
 
+/** 運び手不足のヒント: 不足が続いた秒数のしきい値と、出した後に出さない秒数 */
+const HIRE_TIP = { lag: 30, cd: 600 };
+
+/** 満杯で止まった出荷元のうち、この tick に拾われず、届け先（本部を含む）があるものが残っている */
+function stalledLeft(s: GameState, ctx: Ctx) {
+  for (const id of ctx.L.fullSince.keys()) {
+    const src = ctx.byId.get(id);
+    const item = src?.out;
+    if (!src || !item || available(s, src, item) <= 0) continue;
+    if (receiver(s, ctx, src, item, ctx.fromBuilding(src))) return true;
+  }
+  return false;
+}
+
+/** 運び手不足の時間を数え（揺れで消えないよう減衰）、30 秒ぶんたまったら hireTip を出す（10 分に 1 回まで、襲撃中は出さない） */
+function hireTip(s: GameState, short: boolean, dt: number, events: GameEvent[]) {
+  const h = s.hireTip;
+  h.lag = short ? h.lag + dt : Math.max(0, h.lag - dt);
+  h.cd = Math.max(0, h.cd - dt);
+  if (h.lag < HIRE_TIP.lag || h.cd > 0 || s.raid.cur) return;
+  events.push({ kind: 'hireTip', amount: hireCost(s), x: 0, y: 0 });
+  h.lag = 0;
+  h.cd = HIRE_TIP.cd;
+}
+
 /** 待機中の猫に運搬の仕事を割り当てる（tick の冒頭に 1 回） */
-export function assignJobs(s: GameState, ctx: Ctx) {
+export function assignJobs(s: GameState, ctx: Ctx, dt: number, events: GameEvent[]) {
   // 満杯で止まった出荷元の記録（待機猫がいない tick も数える）
   const L = ctx.L;
   L.clock++;
@@ -92,7 +118,14 @@ export function assignJobs(s: GameState, ctx: Ctx) {
     } else L.fullSince.delete(src.id);
   }
   const free = s.cats.filter(isFreeCarrier);
-  if (!free.length) return;
+  if (free.length) assignFree(s, ctx, free);
+  // 割当の後に待機猫が残らず、止まった出荷元が残っていれば運び手不足（free は割り当てた猫を抜いてある）
+  hireTip(s, !free.length && stalledLeft(s, ctx), dt, events);
+}
+
+/** 待機猫を段階の高い組から割り当てる（割り当てた猫は free から抜く） */
+function assignFree(s: GameState, ctx: Ctx, free: Cat[]) {
+  const L = ctx.L;
   const tile = new Map(free.map((c) => [c, { x: Math.round(c.x), y: Math.round(c.y) }]));
   // 出荷元ごとの、一番近い待機猫までの距離（届かなければ組を作らない）
   const near = new Map<Building, number>();

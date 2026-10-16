@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { ITEM_IDS, ORES, RECIPES, SQUEEZE, type BuildingType, type ItemId, type RecipeId } from './data';
-import { haulStatus, isFreeCarrier, needOf } from './haul';
+import { assignJobs, haulStatus, isFreeCarrier, needOf } from './haul';
 import { bfs, occupancy, type Bfs } from './path';
-import { accepts, bufferCap, gridSize, hireCat, initialState, keepOf, placeBuilding, rand, stock, storeCap, type Building, type Cat, type GameState } from './state';
+import { accepts, bufferCap, gridSize, hireCat, hireCost, initialState, keepOf, placeBuilding, rand, stock, storeCap, type Building, type Cat, type GameState } from './state';
 import { parseSave } from './save';
-import { outputFull, simOptions, tick } from './tick';
+import { Ctx, outputFull, simOptions, tick, type GameEvent } from './tick';
 import stalledSave from './fixtures/user-save-stalled-hq.json?raw';
 
 const DT = 0.1;
@@ -296,5 +296,78 @@ describe('運搬の割当（需要優先）', () => {
     hireCat(s);
     expect(row('ironOre')?.reason).toBe('割り当て待ち');
     expect(hq.type).toBe('hq');
+  });
+});
+
+describe('運び手不足のヒント', () => {
+  /** 出力が満杯（10）の採掘機 3 台と本部。猫は cats 匹 */
+  function stalledMiners(cats: number) {
+    const s = initialState(4);
+    s.raid.next = 1e9;
+    s.ores = [{ x: 4, y: 0, k: 'ironOre' }, { x: -4, y: 2, k: 'copperOre' }, { x: 0, y: -5, k: 'stone' }];
+    for (const o of s.ores) expect(placeBuilding(s, 'miner', o.x, o.y)).toBeNull();
+    s.store = {};
+    for (const b of s.buildings) if (b.type === 'miner') Object.assign(b, { out: s.ores.find((o) => o.x === b.x && o.y === b.y)!.k, output: bufferCap(b) });
+    s.cats.length = Math.min(s.cats.length, cats);
+    s.coins = 1e9;
+    while (s.cats.length < cats) hireCat(s);
+    s.coins = 0;
+    return s;
+  }
+  /** sec 秒回して、hireTip が出た時刻 */
+  function run(s: GameState, sec: number) {
+    const saved = { ...simOptions };
+    simOptions.runaway = 0;
+    const at: number[] = [];
+    try {
+      for (let i = 0; i < Math.round(sec / DT); i++)
+        for (const e of tick(s, DT))
+          if (e.kind === 'hireTip') {
+            expect(e.amount).toBe(hireCost(s));
+            at.push(i * DT);
+          }
+    } finally {
+      Object.assign(simOptions, saved);
+    }
+    return at;
+  }
+
+  it('猫 1 匹で止まった採掘機が拾われないままなら 40 秒以内に出し、10 分は出さず、条件が続けばまた出す', () => {
+    const s = stalledMiners(1);
+    const first = run(s, 40);
+    expect(first).toHaveLength(1);
+    expect(s.hireTip.cd).toBeGreaterThan(0);
+    const t0 = first[0];
+    const later = run(s, 640).map((t) => t + 40);
+    expect(later).toHaveLength(1);
+    expect(later[0] - t0).toBeGreaterThanOrEqual(600 - 1e-6);
+    expect(later[0] - t0).toBeLessThan(640);
+  });
+
+  it('猫 6 匹なら（待機中の猫が残る）出さない', () => {
+    const s = stalledMiners(6);
+    expect(run(s, 300)).toEqual([]);
+  });
+
+  it('本部の倉庫がその品で満杯（届け先がない）なら出さない', () => {
+    const s = stalledMiners(0);
+    for (const o of s.ores) s.store[o.k] = storeCap(s);
+    expect(run(s, 60)).toEqual([]);
+    expect(s.hireTip.lag).toBe(0);
+    // 本部に空きがあれば、猫が 0 匹でも出す
+    for (const o of s.ores) s.store[o.k] = 0;
+    expect(run(s, 40)).toHaveLength(1);
+  });
+
+  it('襲撃中は出さない（不足の時間は溜まり、襲撃が終われば出す）', () => {
+    const s = stalledMiners(0);
+    s.raid.cur = {} as NonNullable<GameState['raid']['cur']>;
+    const events: GameEvent[] = [];
+    for (let i = 0; i < 400; i++) assignJobs(s, new Ctx(s), DT, events);
+    expect(events).toEqual([]);
+    expect(s.hireTip.lag).toBeGreaterThanOrEqual(30);
+    s.raid.cur = null;
+    assignJobs(s, new Ctx(s), DT, events);
+    expect(events).toEqual([{ kind: 'hireTip', amount: hireCost(s), x: 0, y: 0 }]);
   });
 });

@@ -273,6 +273,8 @@ export interface GameState {
   hand: HandState;
   /** 「歯車が足りないときは本部で手作りできる」を出したか */
   craftTip: boolean;
+  /** 運び手不足のヒント: 不足が続いた秒数（減衰する）と、次に出せるまでの秒数 */
+  hireTip: { lag: number; cd: number };
 }
 
 /** チュートリアルの段階: 建てる建物か、作る品か、RP */
@@ -287,7 +289,7 @@ export const START_CATS = 3;
 export function initialState(seed = 1): GameState {
   const s: GameState = {
     coins: 300, rp: 0, buildings: [], cats: [], researched: [], nextId: 1, incomeRate: 0, tut: 0, expansions: 0, levels: {}, seed: seed >>> 0, layoutVersion: 0, rev: 0,
-    raid: newRaidState(), store: { ...START_STORE }, sell: {}, keep: {}, ores: [], oreSeed: seed >>> 0, lifts: [], runaway: newRunaway(seed), hand: newHand(), craftTip: false,
+    raid: newRaidState(), store: { ...START_STORE }, sell: {}, keep: {}, ores: [], oreSeed: seed >>> 0, lifts: [], runaway: newRunaway(seed), hand: newHand(), craftTip: false, hireTip: { lag: 0, cd: 0 },
   };
   for (let i = 0; i < START_CATS; i++) addCat(s);
   placeHq(s);
