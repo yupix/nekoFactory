@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ITEM_IDS, STAT_GROWTH } from './data';
-import { assignCat, buyResearch, catSpeed, expandCost, expandIsland, facilityUsers, gridSize, hireCat, infiniteCost, initialState, placeBuilding, removeBuilding, renameCat, tradeMultiplier, upgradeBuilding, type Cat, type GameState } from './state';
+import { assignCat, buyResearch, carryOf, catSpeed, expandCost, expandIsland, facilityUsers, gridSize, hireCat, hireCost, infiniteCost, initialState, placeBuilding, removeBuilding, renameCat, tradeMultiplier, upgradeBuilding, type Cat, type GameState } from './state';
 import { dump, factory, hash } from './fixture';
 import { simOptions, tick } from './tick';
 
@@ -89,6 +89,21 @@ describe('sim', () => {
     s.coins = 1e9;
     expect(gridSize(s)).toBe(60);
     expect(expandIsland(s)).toBe('これ以上は広げられません');
+  });
+
+  it('初期の猫は 3 匹、4 匹目の雇用コストは 137、基本の運搬量は 2（研究で 3 → 4）', () => {
+    const s = initialState(4);
+    expect(s.cats).toHaveLength(3);
+    expect(hireCost(s)).toBe(137);
+    s.coins = 1e6;
+    hireCat(s);
+    expect(hireCost(s)).toBe(192);
+    const c = Object.assign(s.cats[0], { stats: { ...s.cats[0].stats, str: 0 } });
+    expect(carryOf(s, c)).toBe(2);
+    s.researched.push('cargo1');
+    expect(carryOf(s, c)).toBe(3);
+    s.researched.push('cargo2');
+    expect(carryOf(s, c)).toBe(4);
   });
 
   it('無限研究はレベルごとにコストが上がり、効果が積み重なる', () => {
@@ -192,14 +207,14 @@ describe('sim', () => {
   });
 
   it('高速化の前後で結果が変わらない（猫 50・建物 150・36×36 を 600 tick）', () => {
-    // 猫が建物をすり抜けるようにしたときのダンプのハッシュ（意図しない挙動の変化の検出用）。
+    // 基本の運搬量を 2 にしたときのダンプのハッシュ（意図しない挙動の変化の検出用）。
     // 出荷元 BFS の逆順の経路（距離は同じで同じ長さの経路の選び方だけが違う）は結果を変えるので切って比べる
     const saved = { ...simOptions };
     Object.assign(simOptions, { retry: 0, reversePath: false });
     try {
       const s = factory(50, 150, 36);
       run(s, 60);
-      expect({ coins: s.coins, rp: s.rp, hash: hash(dump(s)) }).toEqual({ coins: 6376, rp: 790, hash: 'f3acd5a' });
+      expect({ coins: s.coins, rp: s.rp, hash: hash(dump(s)) }).toEqual({ coins: 6273, rp: 1050, hash: 'a612938' });
     } finally {
       Object.assign(simOptions, saved);
     }
@@ -295,10 +310,10 @@ describe('sim', () => {
         tick(s, DT);
         return s.cats[0].amount;
       };
-      expect(amountWith(49.9)).toBe(1);
-      expect(amountWith(50)).toBe(2);
-      expect(amountWith(99.9)).toBe(2);
-      expect(amountWith(100)).toBe(3);
+      expect(amountWith(49.9)).toBe(2);
+      expect(amountWith(50)).toBe(3);
+      expect(amountWith(99.9)).toBe(3);
+      expect(amountWith(100)).toBe(4);
     });
 
     it('配属先を撤去すると運び屋に戻る', () => {

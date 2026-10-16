@@ -192,7 +192,7 @@ describe('運搬の割当（需要優先）', () => {
         fullFor = iron.output >= bufferCap(iron) ? fullFor + DT : 0;
         maxFull = Math.max(maxFull, fullFor);
       }
-      // 2 匹・運搬量 1 では採掘機の方が速いので満杯にはなるが、拾われずに止まり続けることはない
+      // 2 匹・運搬量 2 でも採掘機の方が速いので満杯にはなるが、拾われずに止まり続けることはない
       expect(delivered).toBeGreaterThanOrEqual(15);
       expect(made).toBeGreaterThanOrEqual(15);
       expect(maxFull).toBeLessThan(20);

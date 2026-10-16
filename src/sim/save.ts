@@ -1,7 +1,7 @@
 import { GRID, INFINITE, RAID, RESEARCH } from './data';
-import { genOres, gridSize, initCat, initialState, maxHp, newHand, newRaidState, newRunaway, offlineMultiplier, placeHq, type Cat, type GameState } from './state';
+import { addCat, catCount, genOres, gridSize, initCat, initialState, maxHp, newHand, newRaidState, newRunaway, offlineMultiplier, placeHq, START_CATS, type Cat, type GameState } from './state';
 
-export const SAVE_VERSION = 7;
+export const SAVE_VERSION = 8;
 export const KEY = 'nekoFactory';
 export const BACKUP_KEY = 'nekoFactory.bak';
 const MAX_OFFLINE_SEC = 8 * 3600;
@@ -64,6 +64,10 @@ const MIGRATIONS: Record<number, (s: GameState, now: number) => void> = {
     if (!r || r.wave > 0 || r.cur) return;
     r.next = Math.min(RAID.first, r.next + RAID.first - 480);
     if (r.next > 180) r.tip = false;
+  },
+  // v7→v8: 初期の猫を 3 匹にした。ロボ猫を除く猫が 3 匹未満なら 3 匹になるまで足す（既存の島への一度きりのプレゼント）
+  7(s) {
+    while (catCount(s) < START_CATS) addCat(s);
   },
 };
 

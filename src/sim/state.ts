@@ -279,13 +279,15 @@ export const tutorialDone = (s: GameState) => s.tut >= TUTORIAL.length;
 
 export const newRaidState = (): RaidState => ({ next: RAID.first, wave: 0, tip: false, cur: null });
 
+/** 初期の猫の数（雇用コストはこの次の 1 匹から数える） */
+export const START_CATS = 3;
+
 export function initialState(seed = 1): GameState {
   const s: GameState = {
     coins: 300, rp: 0, buildings: [], cats: [], researched: [], nextId: 1, incomeRate: 0, tut: 0, expansions: 0, levels: {}, seed: seed >>> 0, layoutVersion: 0, rev: 0,
     raid: newRaidState(), store: { ...START_STORE }, sell: {}, keep: {}, ores: [], oreSeed: seed >>> 0, lifts: [], runaway: newRunaway(seed), hand: newHand(), craftTip: false,
   };
-  addCat(s);
-  addCat(s);
+  for (let i = 0; i < START_CATS; i++) addCat(s);
   placeHq(s);
   genOres(s, 0, gridSize(s));
   return s;
@@ -408,7 +410,7 @@ export const costText = (cost: Cost, mult = 1) => (Object.keys(cost) as ItemId[]
 /** 資材の売値の合計（修理費の基準） */
 const costValue = (cost: Cost) => (Object.keys(cost) as ItemId[]).reduce((a, id) => a + ITEMS[id].value * cost[id]!, 0);
 export const catSpeed = (s: GameState): number => 2 * (1 + 0.25 * count(s, ['speed1', 'speed2', 'speed3']) + 0.05 * level(s, 'speedInf'));
-export const carryCap = (s: GameState) => 1 + count(s, ['cargo1', 'cargo2']) + Math.floor(level(s, 'cargoInf') / 5);
+export const carryCap = (s: GameState) => 2 + count(s, ['cargo1', 'cargo2']) + Math.floor(level(s, 'cargoInf') / 5);
 export const productionSpeed = (s: GameState) => 1 + 0.2 * count(s, ['eff1', 'eff2', 'eff3']) + 0.05 * level(s, 'effInf');
 export const offlineMultiplier = (s: GameState) => (has(s, 'maneki') ? 2 : 1);
 /** 市場の売値の倍率（交渉∞） */
@@ -556,7 +558,7 @@ export const buildingCost = (_s: GameState, type: BuildingType): Cost => BUILDIN
 export const catCount = (s: GameState) => s.cats.filter((c) => !c.robot).length;
 export const robotCount = (s: GameState) => s.cats.length - catCount(s);
 export const hireCost = (s: GameState) =>
-  Math.floor(70 * 1.4 ** catCount(s) * 0.7 ** count(s, ['herd1', 'herd2']));
+  Math.floor(70 * 1.4 ** (catCount(s) - 1) * 0.7 ** count(s, ['herd1', 'herd2']));
 export const expandCost = (s: GameState) => 500 * 2 ** s.expansions;
 export const infiniteCost = (s: GameState, id: InfiniteId) => Math.floor(INFINITE[id].base * 1.6 ** level(s, id));
 export const buildingAt = (s: GameState, x: number, y: number) => s.buildings.find((b) => b.x === x && b.y === y);
@@ -1091,7 +1093,8 @@ export function initCat(s: GameState, c: Partial<Cat>) {
 /** 「ミケ ・ 釣り好き ・ のんびり ・ 苦手: 研究」の個性の部分 */
 export const traitText = (c: Cat) => (c.robot ? '運搬ロボット ・ 疲れない ・ 犬から逃げない' : `${STATS[c.good].trait} ・ ${TEMPERS[c.temper].name} ・ 苦手: ${STATS[c.bad].name}`);
 
-function addCat(s: GameState) {
+/** 猫を 1 匹足す（雇用・初期状態・保存の移行） */
+export function addCat(s: GameState) {
   const color = CAT_COLORS[Math.floor(rand(s) * CAT_COLORS.length)];
   const c: Partial<Cat> = { id: s.nextId++, x: 0, y: 0, color, state: 'idle', path: [], item: null, amount: 0, src: 0, dst: 0 };
   initCat(s, c);

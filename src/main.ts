@@ -329,7 +329,7 @@ const hud = createHud({
     hud.toast(`本部で手作りを始めました: ${done.map((e) => `${ITEMS[e.id].name} ×${e.n * HAND[e.id].n}`).join('・')}（倉庫 → 手作業で進み具合）`, 'good', 3500);
   },
   async reset() {
-    const ok = await hud.ask({ title: '最初からやり直しますか？', body: '<p>セーブを消して、コイン 300・猫 2 匹・初期資材から始めます。</p>', ok: 'やり直す', cancel: 'やめる', danger: true });
+    const ok = await hud.ask({ title: '最初からやり直しますか？', body: '<p>セーブを消して、コイン 300・猫 3 匹・初期資材から始めます。</p>', ok: 'やり直す', cancel: 'やめる', danger: true });
     if (!ok) return;
     resetting = true;
     clearSave();

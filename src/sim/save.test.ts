@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { BACKUP_KEY, KEY, SAVE_VERSION, loadGame, saveGame, serialize } from './save';
-import { initialState } from './state';
+import { hireCat, initialState } from './state';
 
 const store = new Map<string, string>();
 Object.assign(globalThis, {
@@ -53,7 +53,8 @@ describe('save', () => {
     expect(s.store).toEqual({ ironPlate: 60, gear: 20, stone: 40, brick: 10, coal: 30 });
     expect(s.ores.some((o) => Math.max(Math.abs(o.x + 0.5), Math.abs(o.y + 0.5)) > 14)).toBe(true);
     expect(s.raid).toEqual({ next: 900, wave: 0, tip: false, cur: null });
-    expect(s.cats).toHaveLength(1);
+    // 名簿の猫に、v8 の移行で 3 匹になるまで足した猫が続く
+    expect(s.cats).toHaveLength(3);
     expect(s.cats[0]).toMatchObject({ id: 7, name: 'みけ', color: 'calico', good: 'fish', bad: 'study', temper: 'calm', state: 'idle', item: null, job: 0, rest: null, restAt: 0, x: 0, y: 0, robot: false });
     expect(s.cats[0].stats).toMatchObject({ leg: 40, fish: 61, brave: 9 });
     expect(s.cats[0].stats.mine).toBeGreaterThanOrEqual(0);
@@ -117,6 +118,24 @@ describe('save', () => {
     const r = loadGame(NOW);
     expect(r.source).toBe('new');
     expect(r.state.coins).toBe(300);
-    expect(r.state.cats).toHaveLength(2);
+    expect(r.state.cats).toHaveLength(3);
+  });
+
+  it('v7 の保存は、ロボ猫を除く猫が 3 匹になるまで足す（すでに 3 匹以上なら足さない）', () => {
+    const s = initialState(5);
+    s.cats.length = 1;
+    s.cats.push({ ...s.cats[0], id: 90, robot: true });
+    s.nextId = 91;
+    store.set(KEY, JSON.stringify({ version: 7, savedAt: NOW, state: s }));
+    const r = loadGame(NOW);
+    expect(r.state.cats.filter((c) => !c.robot)).toHaveLength(3);
+    expect(r.state.cats).toHaveLength(4);
+    expect(new Set(r.state.cats.map((c) => c.id)).size).toBe(4);
+    expect(r.state.cats.slice(2).every((c) => c.id >= 91 && c.name && c.state === 'idle')).toBe(true);
+    const many = initialState(5);
+    many.coins = 1e6;
+    hireCat(many);
+    store.set(KEY, JSON.stringify({ version: 7, savedAt: NOW, state: many }));
+    expect(loadGame(NOW).state.cats).toHaveLength(4);
   });
 });
