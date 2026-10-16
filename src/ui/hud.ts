@@ -131,7 +131,10 @@ class Counter {
 
 export interface HudHandlers {
   audio: GameAudio;
+  /** 建設・撤去のモードを切り替える（同じものをもう一度選ぶと解除、null で解除） */
   select(m: Mode): void;
+  /** 今のモード */
+  mode(): Mode;
   hire(): void;
   research(): void;
   /** 猫の一覧を開閉する */
@@ -413,7 +416,9 @@ export function createHud(h: HudHandlers) {
     const short = cost ? missing(s, cost) : {};
     const lack = Object.keys(short).length > 0;
     const plan = lack ? handPlan(s, cost!) : [];
-    const key = (multi ? `${mode}:${placeRecipes[mode] ?? ''}:${s.researched.length}` : mode === 'lift' ? `lift:${liftDir}` : mode === 'miner' ? 'miner' : '') + (lack ? `|${JSON.stringify(short)}:${plan.length}` : '');
+    // タッチでは右クリック・Esc がないので、やめるボタンを出す
+    const cancel = !!mode && hoverless.matches;
+    const key = (multi ? `${mode}:${placeRecipes[mode] ?? ''}:${s.researched.length}` : mode === 'lift' ? `lift:${liftDir}` : mode === 'miner' ? 'miner' : '') + (lack ? `|${JSON.stringify(short)}:${plan.length}` : '') + (cancel ? `|x:${mode}` : '');
     opts.hidden = !key;
     if (key === optsKey) return;
     optsKey = key;
@@ -432,6 +437,14 @@ export function createHud(h: HudHandlers) {
     } else if (mode === 'lift') {
       opts.innerHTML = `<span class="ol">向き</span><b class="dir"><i style="transform: rotate(${liftDir * 90}deg)">${ICON.arrow}</i>${DIR_NAME[liftDir]}</b><button class="btn rot" data-rot="1">${ICON.rotate}<span>回転</span><kbd>R</kbd></button><small>ドラッグで続けて置ける。置いたリフトにもう一度置くと向きだけ変わる</small>`;
       opts.querySelector<HTMLButtonElement>('[data-rot]')!.onclick = () => h.rotate();
+    }
+    if (cancel) {
+      opts.insertAdjacentHTML('afterbegin', `<button class="btn cancel">${ICON.close}<span>${mode === 'remove' ? '撤去をやめる' : '設置をやめる'}</span></button>`);
+      opts.querySelector<HTMLButtonElement>('.cancel')!.onclick = () => {
+        hideTip();
+        h.select(null);
+        sfx('close');
+      };
     }
     if (lack) {
       opts.insertAdjacentHTML('beforeend', `<div class="short"><span>資材が足りません</span><span class="cost">${costHtml(short)}</span>${plan.length ? `<button class="btn primary craft">${ICON.hammer}<span>本部で手作りできる</span></button>` : ''}</div>`);
@@ -459,7 +472,9 @@ export function createHud(h: HudHandlers) {
       return;
     }
     tip.style.left = `${Math.min(innerWidth - w - 10, Math.max(10, r.left + r.width / 2 - w / 2))}px`;
-    tip.style.top = anchor === expandBtn ? `${r.bottom + 12}px` : `${r.top - th - 12}px`;
+    // 設置中の補助（やめるボタン・作るもの）が出ていれば、それを隠さないよう上に出す
+    const top = opts.hidden ? r.top : Math.min(r.top, opts.getBoundingClientRect().top);
+    tip.style.top = anchor === expandBtn ? `${r.bottom + 12}px` : `${top - th - 12}px`;
   };
   const hideTip = () => {
     tipFor = null;
@@ -469,12 +484,19 @@ export function createHud(h: HudHandlers) {
   for (const s of [...slots.map((x) => x.el), hire, remove, expandBtn]) {
     s.addEventListener('pointerenter', (e) => e.pointerType === 'mouse' && !hoverless.matches && (tipFor = s));
     s.addEventListener('pointerleave', (e) => e.pointerType === 'mouse' && hideTip());
+    // タッチ: 選んだときだけ短く出す（もう一度タップして設置をやめたときは出さない）。ボタンの onclick の後に走るので、モードは切り替わった後
     s.addEventListener('click', () => {
       if (!hoverless.matches || s === expandBtn) return;
+      const slot = slots.find((x) => x.el === s);
+      // 未解放の建物は選べないので、解放に要る研究を見せる
+      const show = slot ? !slotUnlocked(state(), slot.type) || h.mode() === slot.type : s === hire || h.mode() === 'remove';
+      if (!show) return hideTip();
       tipFor = s;
-      tipUntil = performance.now() + 3000;
+      tipUntil = performance.now() + 2500;
     });
   }
+  // タッチで出した説明は、画面のどこかに触れたら閉じる（地図の操作の邪魔をしない）
+  addEventListener('pointerdown', () => tipUntil && hideTip(), true);
 
   const timeHtml = (sec: number, s: GameState) => `<span class="time">${ICON.clock}${(sec / productionSpeed(s)).toFixed(1)}秒</span>`;
   function recipeRow(id: RecipeId, s: GameState, out?: ItemId | null) {
@@ -504,7 +526,9 @@ export function createHud(h: HudHandlers) {
   function buildingTip(t: Slot, s: GameState) {
     const n = t === 'lift' ? s.lifts.length : buildingCount(s, t);
     const lock = !slotUnlocked(s, t) ? `<p class="need">${ICON.lock}研究「${slotLock(t)}」で解放</p>` : '';
-    return `<h4>${slotName(t)}${n ? `<small>${n} ${t === 'lift' ? 'タイル' : '棟'}</small>` : ''}</h4><p>${DESC[t]}</p>${recipe(t, s)}${lock || `<p class="price cost">${costHtml(slotCost(t), s)}</p>`}`;
+    // タッチでは画面を覆わないよう、レシピの多い建物（石の炉・組立機）の一覧は省く（作るものは設置中のチップで選べる）
+    const long = t !== 'lift' && MULTI_RECIPE.includes(t) && hoverless.matches;
+    return `<h4>${slotName(t)}${n ? `<small>${n} ${t === 'lift' ? 'タイル' : '棟'}</small>` : ''}</h4><p>${DESC[t]}</p>${long ? '' : recipe(t, s)}${lock || `<p class="price cost">${costHtml(slotCost(t), s)}</p>`}`;
   }
 
   // --- 情報カード ---

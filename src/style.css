@@ -685,6 +685,8 @@ body.intro #bar { transform: translate(-50%, 140%); opacity: 0; }
 #place-opts .short .cost { display: inline-flex; gap: 6px; }
 #place-opts .short .ci { width: 20px; height: 20px; }
 #place-opts .craft { height: 36px; padding: 0 12px; font-size: 13px; }
+#place-opts .cancel { height: 44px; padding: 0 14px; font-size: 14px; }
+#place-opts .cancel svg { width: 16px; height: 16px; }
 
 /* 猫の一覧のロボ猫 */
 .cl-row.robot { background: linear-gradient(#f4f8fb, #fff); }

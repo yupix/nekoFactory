@@ -281,6 +281,7 @@ const hud = createHud({
     mode = mode === m ? null : m;
     if (mode) select(null);
   },
+  mode: () => mode,
   hire,
   research: () => panel.toggle(),
   cats: () => catList.toggle(),
